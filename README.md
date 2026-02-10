@@ -4,8 +4,8 @@
 
 ### 1. Clone the Repository
 ```bash
-git clone <your-repository-url>
-cd mini_project
+git clone https://github.com/listless34/Suspicious-Activity-Detection.git
+cd Suspicious-Activity-Detection
 ```
 
 ---
