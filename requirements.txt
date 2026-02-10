@@ -1,0 +1,10 @@
+flask
+ultralytics
+opencv-python
+numpy
+onnxruntime
+faiss-cpu
+insightface
+pillow
+scipy
+
