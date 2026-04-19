@@ -1,23 +1,641 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Pose-Based Threat Detection</title>
-    <style>
-        body {
-            background: #0c0c0c;
-            color: white;
-            text-align: center;
-            font-family: Arial;
-        }
-        img {
-            border: 3px solid #333;
-            margin-top: 20px;
-            max-width: 95%;
-        }
-    </style>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Drone Surveillance — Suspicious Activity Detection</title>
+  <meta name="description" content="Real-time AI drone surveillance with emotion, weapon, and pose detection."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+
+  <style>
+    /* ─── TOKENS ─────────────────────────────────────────────── */
+    :root{
+      --bg:        #04060f;
+      --bg-panel:  #080e1e;
+      --bg-card:   #0d1428;
+      --border:    rgba(0,170,255,.13);
+      --border-hi: rgba(0,180,255,.35);
+      --cyan:  #00c8ff;
+      --green: #00dc78;
+      --amber: #ffaa00;
+      --red:   #ff2828;
+      --text:  #ddeeff;
+      --muted: #4a6a88;
+      --dim:   #2a4a60;
+      --mono:  'JetBrains Mono', monospace;
+      --ui:    'Inter', sans-serif;
+    }
+
+    /* ─── RESET ──────────────────────────────────────────────── */
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;background:var(--bg);color:var(--text);
+              font-family:var(--ui);overflow:hidden}
+
+    /* scanlines */
+    body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:9000;
+      background:repeating-linear-gradient(0deg,transparent,transparent 2px,
+        rgba(0,0,0,.06) 2px,rgba(0,0,0,.06) 4px)}
+
+    /* ─── HEADER ─────────────────────────────────────────────── */
+    #hdr{
+      display:flex;align-items:center;justify-content:space-between;
+      height:48px;padding:0 16px;
+      background:linear-gradient(90deg,#060a14,#0b1630,#060a14);
+      border-bottom:1px solid var(--border-hi);
+      position:relative;z-index:100;flex-shrink:0;
+    }
+    #hdr::after{
+      content:'';position:absolute;bottom:-1px;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+      animation:scan 4s linear infinite;
+    }
+    @keyframes scan{0%,100%{opacity:0;transform:scaleX(.2)}50%{opacity:1;transform:scaleX(1)}}
+
+    .hdr-left{display:flex;align-items:center;gap:12px}
+    .drone-ico{
+      width:32px;height:32px;border-radius:7px;display:flex;
+      align-items:center;justify-content:center;font-size:17px;
+      background:linear-gradient(135deg,#001428,#002248);
+      border:1px solid var(--border-hi);
+    }
+    #hdr h1{font-size:13px;font-weight:700;letter-spacing:2.5px;
+             text-transform:uppercase;color:var(--cyan);
+             text-shadow:0 0 18px rgba(0,200,255,.6)}
+    .hdr-sub{font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:1px}
+
+    .hdr-right{display:flex;align-items:center;gap:18px}
+    #clock{font-family:var(--mono);font-size:14px;color:var(--cyan);letter-spacing:1px}
+    #ws-pill{display:flex;align-items:center;gap:6px;
+             font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase}
+    #ws-dot{width:8px;height:8px;border-radius:50%;background:var(--red);transition:background .3s}
+    #ws-dot.on{background:var(--green);animation:blink 2s ease-in-out infinite}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+
+    /* ─── OUTER LAYOUT ───────────────────────────────────────── */
+    #root{
+      display:flex;
+      flex-direction:row;
+      height:calc(100vh - 48px);
+      gap:8px;padding:8px;
+      overflow:hidden;
+    }
+
+    /* ─── LEFT COLUMN (video + timeline) ─────────────────────── */
+    #left-col{
+      display:flex;flex-direction:column;
+      gap:8px;
+      flex:1 1 0;           /* takes all remaining space */
+      min-width:0;
+      overflow:hidden;
+    }
+
+    /* ─── RIGHT COLUMN (panels) ──────────────────────────────── */
+    #right-col{
+      display:flex;flex-direction:column;
+      gap:8px;
+      width:300px;          /* fixed width, never shrinks */
+      flex-shrink:0;
+      overflow-y:auto;overflow-x:hidden;
+    }
+    #right-col::-webkit-scrollbar{width:3px}
+    #right-col::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:2px}
+
+    /* ─── VIDEO PANEL ────────────────────────────────────────── */
+    #video-panel{
+      background:var(--bg-panel);border:1px solid var(--border);
+      border-radius:10px;overflow:hidden;
+      display:flex;flex-direction:column;
+      flex:1 1 0;min-height:0;
+    }
+    .panel-hdr{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:7px 14px;background:rgba(0,0,0,.5);
+      border-bottom:1px solid var(--border);flex-shrink:0;
+    }
+    .panel-title{font-size:10px;font-weight:700;letter-spacing:2px;
+                  text-transform:uppercase;color:var(--cyan)}
+    .panel-badge{font-family:var(--mono);font-size:9px;padding:2px 8px;
+                  border-radius:4px;background:rgba(0,200,255,.08);
+                  border:1px solid rgba(0,200,255,.2);color:var(--cyan)}
+    #live-dot{display:flex;align-items:center;gap:5px;
+              font-size:10px;font-weight:700;color:var(--red);letter-spacing:1px}
+    #live-dot::before{content:'';width:7px;height:7px;border-radius:50%;
+                       background:var(--red);animation:blink 1s ease-in-out infinite}
+
+    #video-wrap{flex:1;min-height:0;position:relative;background:#000;overflow:hidden}
+    #video-wrap img{width:100%;height:100%;object-fit:contain;display:block}
+
+    /* corner marks */
+    .corner{position:absolute;width:18px;height:18px;
+            border-color:var(--cyan);border-style:solid;opacity:.6;z-index:10}
+    .tl{top:6px;left:6px;border-width:2px 0 0 2px}
+    .tr{top:6px;right:6px;border-width:2px 2px 0 0}
+    .bl{bottom:6px;left:6px;border-width:0 0 2px 2px}
+    .br{bottom:6px;right:6px;border-width:0 2px 2px 0}
+
+    /* ─── TIMELINE ───────────────────────────────────────────── */
+    #timeline{
+      background:var(--bg-card);border:1px solid var(--border);
+      border-radius:10px;overflow:hidden;height:200px;
+      display:flex;flex-direction:column;flex-shrink:0;
+    }
+    #alert-list{
+      flex:1;overflow-y:auto;padding:5px 10px;
+      display:flex;flex-direction:column;gap:3px;
+    }
+    #alert-list::-webkit-scrollbar{width:3px}
+    #alert-list::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:2px}
+    .alert-row{
+      display:flex;align-items:center;gap:8px;padding:4px 6px;
+      border-radius:5px;border-left:2px solid transparent;
+      font-size:11px;flex-shrink:0;
+      animation:fadein .25s ease-out;
+    }
+    @keyframes fadein{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+    .alert-row.INFO    {border-left-color:var(--green)}
+    .alert-row.WARNING {border-left-color:var(--amber);background:rgba(255,170,0,.04)}
+    .alert-row.CRITICAL{border-left-color:var(--red);background:rgba(255,40,40,.07)}
+    .a-ts  {font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap;flex-shrink:0}
+    .a-badge{font-size:8px;font-weight:700;letter-spacing:.5px;padding:1px 5px;
+             border-radius:3px;flex-shrink:0}
+    .a-badge.INFO    {background:rgba(0,220,120,.12);color:var(--green)}
+    .a-badge.WARNING {background:rgba(255,170,0,.14);color:var(--amber)}
+    .a-badge.CRITICAL{background:rgba(255,40,40,.18);color:var(--red)}
+    .a-msg {flex:1;color:var(--text);line-height:1.3}
+    .a-score{font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap;flex-shrink:0}
+
+    /* ─── CARD ───────────────────────────────────────────────── */
+    .card{
+      background:var(--bg-card);border:1px solid var(--border);
+      border-radius:10px;overflow:hidden;flex-shrink:0;
+      transition:border-color .35s,box-shadow .35s;
+    }
+    .card.warn  {border-color:var(--amber);box-shadow:0 0 18px rgba(255,170,0,.12)}
+    .card.crit  {border-color:var(--red);  box-shadow:0 0 26px rgba(255,40,40,.2)}
+    .card-body  {padding:12px 14px}
+
+    /* ─── THREAT GAUGE ───────────────────────────────────────── */
+    #gauge-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 14px 10px}
+    #gauge-svg{overflow:visible}
+    #g-track{fill:none;stroke:rgba(0,170,255,.1);stroke-width:12;stroke-linecap:round}
+    #g-fill {fill:none;stroke-width:12;stroke-linecap:round;
+             stroke-dasharray:252;stroke-dashoffset:252;
+             transition:stroke-dashoffset .8s cubic-bezier(.4,0,.2,1),stroke .5s}
+    #g-val  {font-family:var(--mono);font-size:28px;font-weight:700;
+             fill:var(--cyan);transition:fill .5s}
+    #g-sub  {font-size:9px;fill:var(--muted);letter-spacing:1px;text-transform:uppercase}
+    #alert-lv{
+      font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;
+      padding:4px 16px;border-radius:5px;border:1px solid;transition:all .4s;
+    }
+    #alert-lv.INFO    {color:var(--green);border-color:var(--green);background:rgba(0,220,120,.07)}
+    #alert-lv.WARNING {color:var(--amber);border-color:var(--amber);background:rgba(255,170,0,.07)}
+    #alert-lv.CRITICAL{color:var(--red);  border-color:var(--red);  background:rgba(255,40,40,.1);
+                        animation:crit-pulse .8s ease-in-out infinite}
+    @keyframes crit-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,40,40,.4)}
+                           50%{box-shadow:0 0 0 7px rgba(255,40,40,0)}}
+
+    /* ─── EMOTION ────────────────────────────────────────────── */
+    #emo-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+    #emo-icon{font-size:26px;line-height:1}
+    #emo-name{font-size:16px;font-weight:600;text-transform:capitalize}
+    #emo-conf{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:1px}
+    .ebar-row{display:grid;grid-template-columns:60px 1fr 34px;align-items:center;gap:6px;margin-bottom:4px}
+    .ebar-lbl{font-size:10px;color:var(--muted);text-align:right;text-transform:capitalize}
+    .ebar-bg {height:5px;background:rgba(255,255,255,.05);border-radius:3px;overflow:hidden}
+    .ebar-fill{height:100%;border-radius:3px;transition:width .5s cubic-bezier(.4,0,.2,1)}
+    .ebar-pct{font-family:var(--mono);font-size:9px;color:var(--dim)}
+
+    /* ─── WEAPON ─────────────────────────────────────────────── */
+    #wpn-row{display:flex;align-items:center;gap:12px}
+    #wpn-icon{
+      width:46px;height:46px;border-radius:9px;flex-shrink:0;
+      display:flex;align-items:center;justify-content:center;font-size:22px;
+      background:rgba(255,40,40,.07);border:1px solid rgba(255,40,40,.2);
+      transition:all .3s;
+    }
+    #wpn-icon.hot{background:rgba(255,40,40,.2);border-color:var(--red);
+                   box-shadow:0 0 18px rgba(255,40,40,.4);
+                   animation:blink .65s ease-in-out infinite}
+    #wpn-state{font-size:15px;font-weight:700;letter-spacing:.5px}
+    #wpn-sub  {font-size:10px;color:var(--muted);margin-top:2px}
+    #wpn-list {margin-top:8px;display:flex;flex-direction:column;gap:4px}
+    .wpn-item {
+      display:flex;align-items:center;gap:8px;
+      padding:4px 8px;border-radius:6px;
+      background:rgba(255,40,40,.07);border:1px solid rgba(255,40,40,.18);
+      font-size:11px;animation:fadein .2s ease-out;
+    }
+    .wpn-item-icon{font-size:16px;flex-shrink:0}
+    .wpn-item-name{flex:1;color:var(--text);font-weight:500}
+    .wpn-item-conf{font-family:var(--mono);font-size:9px;color:var(--muted)}
+
+    /* ─── POSE ───────────────────────────────────────────────── */
+    #pose-row{display:flex;align-items:center;gap:12px}
+    #pose-icon{font-size:30px;text-align:center;width:40px;transition:all .4s}
+    #pose-anom{font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+    #pose-cnt {font-size:10px;color:var(--muted);margin-top:2px}
+
+    /* ─── STATS ROW ──────────────────────────────────────────── */
+    #stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+    .stat{background:var(--bg-card);border:1px solid var(--border);
+          border-radius:8px;padding:8px 10px;text-align:center}
+    .stat-v{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--cyan);line-height:1}
+    .stat-l{font-size:8px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:3px}
+  </style>
 </head>
 <body>
-    <h1>YOLOv11 Pose Threat Detection</h1>
-    <img src="{{ url_for('video_feed') }}" height="750" width="1200">
+
+<!-- HEADER -->
+<header id="hdr">
+  <div class="hdr-left">
+    <div class="drone-ico">🛸</div>
+    <div>
+      <h1>Drone Surveillance System</h1>
+      <div class="hdr-sub">Suspicious Activity Detection · AI-Powered · Real-Time</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div id="clock">--:--:--</div>
+    <div id="ws-pill">
+      <div id="ws-dot"></div>
+      <span id="ws-lbl">OFFLINE</span>
+    </div>
+  </div>
+</header>
+
+<!-- ROOT -->
+<div id="root">
+
+  <!-- LEFT COLUMN -->
+  <div id="left-col">
+
+    <!-- VIDEO -->
+    <div id="video-panel">
+      <div class="panel-hdr">
+        <span class="panel-title">Live Camera Feed</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="panel-badge" id="fps-badge">-- FPS</span>
+          <span id="live-dot">LIVE</span>
+        </div>
+      </div>
+      <div id="video-wrap">
+        <img id="vfeed" src="/video_feed" alt="Live feed"/>
+        <div class="corner tl"></div><div class="corner tr"></div>
+        <div class="corner bl"></div><div class="corner br"></div>
+      </div>
+    </div>
+
+    <!-- TIMELINE -->
+    <div id="timeline">
+      <div class="panel-hdr">
+        <span class="panel-title">Alert Timeline</span>
+        <span class="panel-badge" id="ev-badge">0 events</span>
+      </div>
+      <div id="alert-list"></div>
+    </div>
+
+  </div><!-- /left-col -->
+
+  <!-- RIGHT COLUMN -->
+  <div id="right-col">
+
+    <!-- THREAT GAUGE -->
+    <div class="card" id="threat-card">
+      <div class="panel-hdr">
+        <span class="panel-title">Threat Level</span>
+        <span class="panel-badge" id="persons-badge">0 persons</span>
+      </div>
+      <div id="gauge-wrap">
+        <svg id="gauge-svg" width="170" height="92" viewBox="0 0 170 92">
+          <path id="g-track" d="M 20 85 A 65 65 0 0 1 150 85"/>
+          <path id="g-fill"  d="M 20 85 A 65 65 0 0 1 150 85"/>
+          <text id="g-val" x="85" y="82" text-anchor="middle">0</text>
+          <text id="g-sub" x="85" y="93" text-anchor="middle">/ 10</text>
+        </svg>
+        <div id="alert-lv" class="INFO">INFO</div>
+      </div>
+    </div>
+
+    <!-- EMOTION -->
+    <div class="card" id="emo-card">
+      <div class="panel-hdr">
+        <span class="panel-title">Emotion Detection</span>
+        <span class="panel-badge">7-Class</span>
+      </div>
+      <div class="card-body">
+        <div id="emo-top">
+          <div id="emo-icon">😐</div>
+          <div>
+            <div id="emo-name">neutral</div>
+            <div id="emo-conf">—</div>
+          </div>
+        </div>
+        <div id="ebo-bars"><!-- JS --></div>
+      </div>
+    </div>
+
+    <!-- WEAPON -->
+    <div class="card" id="wpn-card">
+      <div class="panel-hdr">
+        <span class="panel-title">Weapon Detection</span>
+        <span class="panel-badge" id="wpn-badge">ONNX · 2-Class</span>
+      </div>
+      <div class="card-body">
+        <div id="wpn-row">
+          <div id="wpn-icon">🔫</div>
+          <div>
+            <div id="wpn-state" style="color:var(--green)">CLEAR</div>
+            <div id="wpn-sub">No weapons detected</div>
+          </div>
+        </div>
+        <!-- Detected weapon list rendered by JS -->
+        <div id="wpn-list"></div>
+      </div>
+    </div>
+
+    <!-- POSE -->
+    <div class="card" id="pose-card">
+      <div class="panel-hdr">
+        <span class="panel-title">Pose Analysis</span>
+        <span class="panel-badge">17-pt Skeleton</span>
+      </div>
+      <div class="card-body">
+        <div id="pose-row">
+          <div id="pose-icon">🧍</div>
+          <div>
+            <div id="pose-anom" style="color:var(--green)">Normal</div>
+            <div id="pose-cnt">0 persons tracked</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div id="stats-row">
+      <div class="stat"><div class="stat-v" id="s-alerts">0</div><div class="stat-l">Alerts</div></div>
+      <div class="stat"><div class="stat-v" id="s-crit">0</div><div class="stat-l">Critical</div></div>
+      <div class="stat"><div class="stat-v" id="s-up">0s</div><div class="stat-l">Uptime</div></div>
+    </div>
+
+  </div><!-- /right-col -->
+
+</div><!-- /root -->
+
+<script>
+/* ══ CONSTANTS ══════════════════════════════════════════════════ */
+const EMO_ICONS={angry:'😡',disgust:'🤢',fear:'😨',happy:'😊',neutral:'😐',sad:'😢',surprise:'😲'};
+const EMO_COLS ={angry:'#ff4040',disgust:'#20b080',fear:'#c060ff',happy:'#00dc78',neutral:'#60a8c0',sad:'#4080ff',surprise:'#ffb000'};
+const POSE_ICONS={normal:'🧍',raised_hands:'🙌',aggressive_stance:'🤜',crouching:'🫳',running:'🏃'};
+const POSE_COLS ={normal:'var(--green)',raised_hands:'var(--cyan)',aggressive_stance:'var(--red)',crouching:'var(--amber)',running:'var(--amber)'};
+const EMOTIONS  =['angry','disgust','fear','happy','neutral','sad','surprise'];
+
+// Weapon class → display icon
+const WPN_ICONS={
+  pistol:'🔫',
+  knife:'🗡️',
+  gun:'🔫',
+  rifle:'🪖',
+  firearm:'🔫',
+  blade:'🗡️',
+  machete:'🗡️',
+  sword:'⚔️',
+  baton:'🪃',
+  taser:'⚡',
+  explosive:'💣',
+};
+// Weapon label → threat colour
+const WPN_TIER_COL={
+  pistol:'var(--red)',
+  knife:'var(--amber)',
+};
+
+/* ══ STATE ══════════════════════════════════════════════════════ */
+let _alerts=0, _crits=0, _start=Date.now(), _ws=null, _retryMs=1000;
+let _lastAlertLevel='INFO', _lastAlertTs=0;
+
+/* ══ GAUGE ══════════════════════════════════════════════════════ */
+const DASH=252;
+function setGauge(score){
+  const p=Math.min(score/10,1);
+  const color=p<.4?'#00dc78':p<.7?'#ffaa00':'#ff2828';
+  const fill=document.getElementById('g-fill');
+  const val =document.getElementById('g-val');
+  fill.style.strokeDashoffset=DASH*(1-p);
+  fill.style.stroke=color;
+  val.textContent=score;
+  val.style.fill=color;
+}
+
+/* ══ INIT EMOTION BARS ══════════════════════════════════════════ */
+function initBars(){
+  const c=document.getElementById('ebo-bars');
+  c.innerHTML=EMOTIONS.map(e=>`
+    <div class="ebar-row">
+      <div class="ebar-lbl">${e}</div>
+      <div class="ebar-bg"><div class="ebar-fill" id="eb-${e}" style="width:0%;background:${EMO_COLS[e]}"></div></div>
+      <div class="ebar-pct" id="ep-${e}">0%</div>
+    </div>`).join('');
+}
+
+/* ══ RENDER STATE (called every WS message) ═════════════════════ */
+function render(s){
+  setGauge(s.threat_score||0);
+  const lv=document.getElementById('alert-lv');
+  lv.textContent=s.alert_level;
+  lv.className=s.alert_level;
+
+  document.getElementById('persons-badge').textContent=
+    `${s.num_persons||0} person${(s.num_persons||0)!==1?'s':''}`;
+
+  // Emotion
+  const emo=s.emotion||'neutral';
+  document.getElementById('emo-icon').textContent=EMO_ICONS[emo]||'😐';
+  const eName=document.getElementById('emo-name');
+  eName.textContent=emo;
+  eName.style.color=EMO_COLS[emo]||'var(--text)';
+  const conf=s.emotion_scores&&s.emotion_scores[emo]?Math.round(s.emotion_scores[emo]*100)+'%':'—';
+  document.getElementById('emo-conf').textContent=conf;
+  for(const[k,v] of Object.entries(s.emotion_scores||{})){
+    const b=document.getElementById(`eb-${k}`),p=document.getElementById(`ep-${k}`);
+    if(b)b.style.width=Math.round(v*100)+'%';
+    if(p)p.textContent=Math.round(v*100)+'%';
+  }
+
+  // Weapon
+  const wi=document.getElementById('wpn-icon');
+  const wst=document.getElementById('wpn-state');
+  const wb=document.getElementById('wpn-sub');
+  const wc=document.getElementById('wpn-card');
+  const wl=document.getElementById('wpn-list');
+  const wbadge=document.getElementById('wpn-badge');
+  const labels  = s.weapon_labels         || [];
+  const dispLbls= s.weapon_display_labels || [];
+  if(s.weapon_detected && labels.length > 0){
+    wi.classList.add('hot');
+    wst.textContent='DETECTED';
+    wst.style.color='var(--red)';
+    wb.textContent=`${labels.length} weapon${labels.length!==1?'s':''} detected`;
+    wc.classList.add('crit');
+    wbadge.textContent=`${labels.length} DETECTED`;
+    // Build per-weapon rows
+    wl.innerHTML=labels.map((lbl,i)=>{
+      const disp=dispLbls[i]||lbl;
+      const icon=WPN_ICONS[lbl]||WPN_ICONS[lbl.split('/')[0].trim().toLowerCase()]||'⚠️';
+      const col =WPN_TIER_COL[lbl]||'var(--amber)';
+      return `<div class="wpn-item">
+        <span class="wpn-item-icon">${icon}</span>
+        <span class="wpn-item-name" style="color:${col}">${disp}</span>
+      </div>`;
+    }).join('');
+  }else{
+    wi.classList.remove('hot');
+    wst.textContent='CLEAR';
+    wst.style.color='var(--green)';
+    wb.textContent='No weapons detected';
+    wc.classList.remove('crit');
+    wbadge.textContent='ONNX · 2-Class';
+    wl.innerHTML='';
+  }
+
+  // Pose
+  const pa=s.pose_anomaly||'normal';
+  document.getElementById('pose-icon').textContent=POSE_ICONS[pa]||'🧍';
+  const pt=document.getElementById('pose-anom');
+  pt.textContent=pa.replace(/_/g,' ');
+  pt.style.color=POSE_COLS[pa]||'var(--green)';
+  document.getElementById('pose-cnt').textContent=
+    `${s.num_persons||0} person${(s.num_persons||0)!==1?'s':''} tracked`;
+
+  // Threat card border
+  const tc=document.getElementById('threat-card');
+  tc.className='card';
+  if(s.alert_level==='WARNING') tc.classList.add('warn');
+  if(s.alert_level==='CRITICAL') tc.classList.add('crit');
+
+  // Stats counters
+  document.getElementById('s-alerts').textContent=_alerts;
+  document.getElementById('s-crit').textContent=_crits;
+}
+
+/* ══ TIMELINE (WARNING/CRITICAL only, 5s dedup) ═════════════════ */
+const MAX_ROWS=60;
+function buildMsg(s){
+  const p=[];
+  const labels=s.weapon_labels||[];
+  const disp  =s.weapon_display_labels||[];
+  if(s.weapon_detected && labels.length>0){
+    const wpnStr=disp.length>0?disp.join(', '):labels.join(', ');
+    p.push('Weapon: '+wpnStr);
+  }
+  if(s.emotion&&s.emotion!=='neutral') p.push('Emotion: '+s.emotion);
+  if(s.pose_anomaly&&s.pose_anomaly!=='normal') p.push('Pose: '+s.pose_anomaly.replace(/_/g,' '));
+  return p.length?p.join(' · '):'Suspicious activity detected';
+}
+function pushAlert(s){
+  // ONLY log WARNING or CRITICAL
+  if(s.alert_level==='INFO') return;
+  // JS-side 5s dedup: same level within 5s = skip
+  const now=Date.now();
+  if(now - _lastAlertTs < 5000 && s.alert_level===_lastAlertLevel) return;
+  _lastAlertTs=now;
+  _lastAlertLevel=s.alert_level;
+
+  const list=document.getElementById('alert-list');
+  const ts=new Date(s.timestamp||Date.now()).toLocaleTimeString('en-GB',{hour12:false});
+  const row=document.createElement('div');
+  row.className=`alert-row ${s.alert_level}`;
+  row.innerHTML=`<span class="a-ts">${ts}</span>
+    <span class="a-badge ${s.alert_level}">${s.alert_level}</span>
+    <span class="a-msg">${buildMsg(s)}</span>
+    <span class="a-score">${s.threat_score}/10</span>`;
+  list.prepend(row);
+  while(list.children.length>MAX_ROWS) list.removeChild(list.lastElementChild);
+  _alerts++;
+  if(s.alert_level==='CRITICAL') _crits++;
+  document.getElementById('ev-badge').textContent=`${_alerts} events`;
+}
+
+/* ══ WEBSOCKET ══════════════════════════════════════════════════ */
+function connect(){
+  const proto=location.protocol==='https:'?'wss':'ws';
+  _ws=new WebSocket(`${proto}://${location.host}/ws/alerts`);
+  _ws.onopen=()=>{
+    _retryMs=1000;
+    document.getElementById('ws-dot').className='on';
+    document.getElementById('ws-lbl').textContent='CONNECTED';
+  };
+  _ws.onmessage=e=>{
+    try{
+      const d=JSON.parse(e.data);
+      if(d.ping) return;
+      render(d);
+      pushAlert(d);
+    }catch(ex){console.warn('[WS]',ex);}
+  };
+  _ws.onerror=()=>{};
+  _ws.onclose=()=>{
+    document.getElementById('ws-dot').className='';
+    document.getElementById('ws-lbl').textContent='RECONNECTING';
+    setTimeout(connect,_retryMs);
+    _retryMs=Math.min(_retryMs*2,8000);
+  };
+}
+
+/* ══ REST FALLBACK ══════════════════════════════════════════════ */
+function pollFallback(){
+  setInterval(async()=>{
+    if(_ws&&_ws.readyState===WebSocket.OPEN) return;
+    try{
+      const r=await fetch('/api/status');
+      const d=await r.json();
+      render(d);  // update panels only, no pushAlert
+    }catch(e){}
+  },2000);
+}
+
+/* ══ FPS estimation ═════════════════════════════════════════════ */
+let _fpsCount=0,_fpsT=Date.now();
+function trackFps(){
+  const vid=document.getElementById('vfeed');
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d');
+  canvas.width=2; canvas.height=2;
+  function tick(){
+    if(vid.naturalWidth>0){ ctx.drawImage(vid,0,0,2,2); _fpsCount++; }
+    const now=Date.now();
+    if(now-_fpsT>=2000){
+      const fps=(_fpsCount/((now-_fpsT)/1000)).toFixed(1);
+      document.getElementById('fps-badge').textContent=`${fps} FPS`;
+      _fpsCount=0; _fpsT=now;
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+/* ══ CLOCK + UPTIME ═════════════════════════════════════════════ */
+function tick(){
+  document.getElementById('clock').textContent=
+    new Date().toLocaleTimeString('en-GB',{hour12:false});
+  const sec=Math.floor((Date.now()-_start)/1000);
+  document.getElementById('s-up').textContent=
+    sec<60?sec+'s':sec<3600?Math.floor(sec/60)+'m':Math.floor(sec/3600)+'h';
+}
+
+/* ══ BOOT ════════════════════════════════════════════════════════ */
+window.addEventListener('DOMContentLoaded',()=>{
+  initBars();
+  setGauge(0);
+  connect();
+  pollFallback();
+  trackFps();
+  setInterval(tick,1000);
+  tick();
+  const vf=document.getElementById('vfeed');
+  vf.addEventListener('error',()=>setTimeout(()=>{vf.src='/video_feed?_='+Date.now();},2000));
+});
+</script>
 </body>
 </html>

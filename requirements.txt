@@ -1,10 +1,25 @@
-flask
-ultralytics
-opencv-python
-numpy
-onnxruntime
-faiss-cpu
-insightface
-pillow
-scipy
+# Core
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+websockets==12.0
+python-multipart==0.0.9
+jinja2==3.1.4
+aiofiles==23.2.1
 
+# GPU-accelerated ONNX inference (CUDA 12 bundled)
+onnxruntime-gpu==1.19.2
+
+# Computer Vision
+opencv-python==4.9.0.80
+numpy==2.1.0
+pillow==10.3.0
+
+# Ultralytics (YOLO wrapper — GPU via PyTorch, optional)
+ultralytics==8.2.18
+
+# Face / Vector DB
+faiss-cpu==1.8.0
+scipy==1.13.0
+
+# Utilities
+python-dotenv==1.0.1
