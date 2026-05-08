@@ -276,7 +276,7 @@
       <div class="panel-hdr">
         <span class="panel-title">Live Camera Feed</span>
         <div style="display:flex;align-items:center;gap:10px">
-          <span class="panel-badge" id="fps-badge">-- FPS</span>
+          <span class="panel-badge" id="fps-badge">0.0 FPS</span>
           <span id="live-dot">LIVE</span>
         </div>
       </div>
@@ -414,6 +414,7 @@ const WPN_TIER_COL={
 /* ══ STATE ══════════════════════════════════════════════════════ */
 let _alerts=0, _crits=0, _start=Date.now(), _ws=null, _retryMs=1000;
 let _lastAlertLevel='INFO', _lastAlertTs=0;
+const ALERT_DEDUP_MS = 8000;  // min ms between timeline entries at same level
 
 /* ══ GAUGE ══════════════════════════════════════════════════════ */
 const DASH=252;
@@ -534,11 +535,13 @@ function buildMsg(s){
   return p.length?p.join(' · '):'Suspicious activity detected';
 }
 function pushAlert(s){
-  // ONLY log WARNING or CRITICAL
+  // Only log WARNING or CRITICAL
   if(s.alert_level==='INFO') return;
-  // JS-side 5s dedup: same level within 5s = skip
   const now=Date.now();
-  if(now - _lastAlertTs < 5000 && s.alert_level===_lastAlertLevel) return;
+  const levelChanged = s.alert_level !== _lastAlertLevel;
+  const cooldownPassed = (now - _lastAlertTs) >= ALERT_DEDUP_MS;
+  // Log on level transition OR after the dedup window
+  if(!levelChanged && !cooldownPassed) return;
   _lastAlertTs=now;
   _lastAlertLevel=s.alert_level;
 
@@ -595,24 +598,32 @@ function pollFallback(){
   },2000);
 }
 
-/* ══ FPS estimation ═════════════════════════════════════════════ */
-let _fpsCount=0,_fpsT=Date.now();
+/* ══ FPS estimation (canvas pixel-diff — works with MJPEG) ════════ */
+let _fpsCount=0, _fpsT=Date.now();
 function trackFps(){
   const vid=document.getElementById('vfeed');
-  const canvas=document.createElement('canvas');
-  const ctx=canvas.getContext('2d');
-  canvas.width=2; canvas.height=2;
-  function tick(){
-    if(vid.naturalWidth>0){ ctx.drawImage(vid,0,0,2,2); _fpsCount++; }
-    const now=Date.now();
-    if(now-_fpsT>=2000){
-      const fps=(_fpsCount/((now-_fpsT)/1000)).toFixed(1);
-      document.getElementById('fps-badge').textContent=`${fps} FPS`;
-      _fpsCount=0; _fpsT=now;
+  const cvs=document.createElement('canvas');
+  cvs.width=4; cvs.height=4;          // tiny — just enough to detect change
+  const ctx=cvs.getContext('2d',{willReadFrequently:true});
+  let lastPx=null;
+
+  function sample(){
+    if(vid.naturalWidth===0){requestAnimationFrame(sample);return;}
+    ctx.drawImage(vid,0,0,4,4);
+    const px=ctx.getImageData(0,0,4,4).data.join(',');
+    if(px!==lastPx){
+      lastPx=px;
+      _fpsCount++;
+      const now=Date.now();
+      if(now-_fpsT>=2000){
+        const fps=(_fpsCount/((now-_fpsT)/1000)).toFixed(1);
+        document.getElementById('fps-badge').textContent=`${fps} FPS`;
+        _fpsCount=0; _fpsT=now;
+      }
     }
-    requestAnimationFrame(tick);
+    requestAnimationFrame(sample);
   }
-  requestAnimationFrame(tick);
+  requestAnimationFrame(sample);
 }
 
 /* ══ CLOCK + UPTIME ═════════════════════════════════════════════ */

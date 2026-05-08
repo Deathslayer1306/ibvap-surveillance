@@ -44,13 +44,69 @@ def _build_providers():
 
 ONNX_PROVIDERS = _build_providers()
 
-# ─── Camera ───────────────────────────────────────────────────────────────────
-# For drone: set CAMERA_SOURCE env var to RTSP URL, e.g. rtsp://192.168.1.1/stream
-CAMERA_SOURCE  = os.environ.get("CAMERA_SOURCE", "0")
-try:
-    CAMERA_SOURCE = int(CAMERA_SOURCE)
-except ValueError:
-    pass   # keep as string (RTSP URL)
+# ─── Camera Mode ──────────────────────────────────────────────────────────────
+# Switch between input sources by changing CAMERA_MODE to one of:
+#
+#   "LOCAL"       — Laptop/desktop webcam (cv2.VideoCapture(0))
+#                   Use this for offline testing when RPi is unavailable.
+#
+#   "RPI_SOCKET"  — RPi streams frames over a raw TCP socket using
+#                   pickle + struct framing (see rpi_sender.py on the RPi side).
+#                   Set RPI_HOST to the RPi's IP address.
+#                   Requires: SSH tunnel OR both devices on the same LAN.
+#                   SSH tunnel example (run on laptop before starting):
+#                     ssh -L 8080:localhost:8080 pi@<RPI_IP>
+#                   Then set RPI_HOST = "127.0.0.1" below.
+#
+#   "RPI_HTTP"    — RPi serves an MJPEG/RTSP stream over HTTP.
+#                   Set RPI_CAMERA_URL to the full stream URL.
+#                   Example (libcamera-vid / motion / mjpg-streamer):
+#                     http://192.168.1.42:8080/?action=stream
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# ↓↓↓  UNCOMMENT ONE LINE BELOW TO SELECT YOUR CAMERA SOURCE  ↓↓↓
+
+#CAMERA_MODE = "RPI_SOCKET"   # ← RPi Pi Camera over TCP socket (rpi_sender.py)
+CAMERA_MODE = "LOCAL"      # ← Laptop/desktop webcam (no RPi needed)
+# CAMERA_MODE = "RPI_HTTP"   # ← RPi MJPEG/RTSP HTTP stream
+
+# ↑↑↑  UNCOMMENT ONE LINE ABOVE TO SELECT YOUR CAMERA SOURCE  ↑↑↑
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ─── Camera — LOCAL mode ──────────────────────────────────────────────────────
+# Index of the local webcam. 0 = default, 1 = second camera, etc.
+# Only used when CAMERA_MODE = "LOCAL".
+LOCAL_CAMERA_INDEX = 0
+
+# ─── Camera — RPI_SOCKET mode ─────────────────────────────────────────────────
+# IP address of the Raspberry Pi (or 127.0.0.1 if using an SSH tunnel).
+# Only used when CAMERA_MODE = "RPI_SOCKET".
+RPI_HOST = "10.156.86.179"        # ← set to RPi's LAN IP (or 127.0.0.1 for SSH tunnel)
+RPI_PORT = 8080                 # must match PORT in rpi_sender.py
+
+# ─── Camera — RPI_HTTP mode ───────────────────────────────────────────────────
+# Full URL of the MJPEG / RTSP stream served by the RPi.
+# Only used when CAMERA_MODE = "RPI_HTTP".
+RPI_CAMERA_URL = f"http://{RPI_HOST}:8080/?action=stream"   # mjpg-streamer default
+# RPI_CAMERA_URL = f"rtsp://{RPI_HOST}:8554/stream"         # libcamera-vid RTSP
+
+# ─── Derived CAMERA_SOURCE (used by camera_thread) ────────────────────────────
+# Resolved automatically from CAMERA_MODE — do not edit this block.
+if CAMERA_MODE == "LOCAL":
+    _raw_source = os.environ.get("CAMERA_SOURCE", str(LOCAL_CAMERA_INDEX))
+    try:
+        CAMERA_SOURCE = int(_raw_source)
+    except ValueError:
+        CAMERA_SOURCE = _raw_source
+elif CAMERA_MODE == "RPI_HTTP":
+    CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE", RPI_CAMERA_URL)
+else:
+    # RPI_SOCKET — camera_thread handles the socket directly; CAMERA_SOURCE unused
+    CAMERA_SOURCE = None
+
+# Network stream reconnect settings (RPI_HTTP / RPI_SOCKET)
+CAMERA_RECONNECT_DELAY = 2.0   # seconds to wait before retrying a dropped stream
+CAMERA_MAX_RETRIES     = 0     # 0 = retry forever
 
 CAMERA_WIDTH   = 1280
 CAMERA_HEIGHT  = 720
