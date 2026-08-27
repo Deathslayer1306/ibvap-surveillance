@@ -1,24 +1,14 @@
-# Python-generated files
+﻿venv/
+.venv/
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-
-# User files
-token.txt
-
-# models
-models/insightface.onnx
-
-# User folders
+*.pt
+*.onnx
+*.pkl
+*.pth
+*.h5
+*.weights
+.env
+*.log
+runs/
 data/
-user_data/
-backups/
-scripts/
-uv.lock
-pyproject.toml
+datasets/

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Drone Surveillance — Suspicious Activity Detection</title>
-  <meta name="description" content="Real-time AI drone surveillance with emotion, weapon, and pose detection."/>
+  <title>IBVAP — Intelligent Border Video Analytics Platform</title>
+  <meta name="description" content="IBVAP: Real-time AI border surveillance — weapon, pose, emotion, ANPR, virtual fence, and vehicle detection. SIH 2026 PS:SIH26187."/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 
@@ -59,7 +59,7 @@
       background:linear-gradient(135deg,#001428,#002248);
       border:1px solid var(--border-hi);
     }
-    #hdr h1{font-size:13px;font-weight:700;letter-spacing:2.5px;
+    #hdr h1{font-size:13px;font-weight:700;letter-spacing:2px;
              text-transform:uppercase;color:var(--cyan);
              text-shadow:0 0 18px rgba(0,200,255,.6)}
     .hdr-sub{font-size:9px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:1px}
@@ -74,32 +74,48 @@
 
     /* ─── OUTER LAYOUT ───────────────────────────────────────── */
     #root{
-      display:flex;
-      flex-direction:row;
+      display:flex;flex-direction:row;
       height:calc(100vh - 48px);
-      gap:8px;padding:8px;
-      overflow:hidden;
+      gap:8px;padding:8px;overflow:hidden;
     }
 
-    /* ─── LEFT COLUMN (video + timeline) ─────────────────────── */
+    /* ─── LEFT COLUMN ────────────────────────────────────────── */
     #left-col{
-      display:flex;flex-direction:column;
-      gap:8px;
-      flex:1 1 0;           /* takes all remaining space */
-      min-width:0;
-      overflow:hidden;
+      display:flex;flex-direction:column;gap:8px;
+      flex:1 1 0;min-width:0;overflow:hidden;
     }
 
-    /* ─── RIGHT COLUMN (panels) ──────────────────────────────── */
+    /* ─── RIGHT COLUMN ───────────────────────────────────────── */
     #right-col{
-      display:flex;flex-direction:column;
-      gap:8px;
-      width:300px;          /* fixed width, never shrinks */
-      flex-shrink:0;
+      display:flex;flex-direction:column;gap:8px;
+      width:300px;flex-shrink:0;
       overflow-y:auto;overflow-x:hidden;
     }
     #right-col::-webkit-scrollbar{width:3px}
     #right-col::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:2px}
+
+    /* ─── CAMERA SWITCHER ────────────────────────────────────── */
+    #cam-switcher{
+      display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+      padding:7px 14px;background:var(--bg-card);
+      border:1px solid var(--border);border-radius:10px;flex-shrink:0;
+    }
+    .cam-label{font-size:9px;color:var(--muted);letter-spacing:1.5px;
+               text-transform:uppercase;white-space:nowrap}
+    .cam-pill{
+      display:flex;align-items:center;gap:5px;
+      padding:4px 12px;border-radius:20px;
+      font-size:10px;font-weight:600;letter-spacing:.5px;
+      background:rgba(0,200,255,.06);border:1px solid rgba(0,200,255,.2);
+      color:var(--muted);cursor:pointer;transition:all .2s;white-space:nowrap;
+    }
+    .cam-pill:hover{border-color:var(--cyan);color:var(--cyan);
+                    background:rgba(0,200,255,.1)}
+    .cam-pill.active{background:rgba(0,200,255,.15);border-color:var(--cyan);
+                     color:var(--cyan);box-shadow:0 0 12px rgba(0,200,255,.25)}
+    .cam-status-dot{width:5px;height:5px;border-radius:50%;
+                    background:var(--muted);flex-shrink:0}
+    .cam-status-dot.live{background:var(--green);animation:blink 2s ease-in-out infinite}
 
     /* ─── VIDEO PANEL ────────────────────────────────────────── */
     #video-panel{
@@ -122,6 +138,8 @@
               font-size:10px;font-weight:700;color:var(--red);letter-spacing:1px}
     #live-dot::before{content:'';width:7px;height:7px;border-radius:50%;
                        background:var(--red);animation:blink 1s ease-in-out infinite}
+    #cam-name-hdr{font-size:10px;color:var(--muted);margin-left:8px;
+                  font-family:var(--mono);letter-spacing:.5px}
 
     #video-wrap{flex:1;min-height:0;position:relative;background:#000;overflow:hidden}
     #video-wrap img{width:100%;height:100%;object-fit:contain;display:block}
@@ -137,8 +155,11 @@
     /* ─── TIMELINE ───────────────────────────────────────────── */
     #timeline{
       background:var(--bg-card);border:1px solid var(--border);
-      border-radius:10px;overflow:hidden;height:200px;
-      display:flex;flex-direction:column;flex-shrink:0;
+      border-radius:10px;overflow:hidden;flex-shrink:0;
+      display:flex;flex-direction:column;
+    }
+    #timeline-inner{
+      max-height:160px;display:flex;flex-direction:column;
     }
     #alert-list{
       flex:1;overflow-y:auto;padding:5px 10px;
@@ -150,9 +171,10 @@
       display:flex;align-items:center;gap:8px;padding:4px 6px;
       border-radius:5px;border-left:2px solid transparent;
       font-size:11px;flex-shrink:0;
-      animation:fadein .25s ease-out;
+      animation:fadein .25s ease-out;cursor:pointer;
     }
     @keyframes fadein{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+    .alert-row:hover{background:rgba(255,255,255,.04)}
     .alert-row.INFO    {border-left-color:var(--green)}
     .alert-row.WARNING {border-left-color:var(--amber);background:rgba(255,170,0,.04)}
     .alert-row.CRITICAL{border-left-color:var(--red);background:rgba(255,40,40,.07)}
@@ -164,6 +186,17 @@
     .a-badge.CRITICAL{background:rgba(255,40,40,.18);color:var(--red)}
     .a-msg {flex:1;color:var(--text);line-height:1.3}
     .a-score{font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap;flex-shrink:0}
+    .a-snap{width:32px;height:24px;object-fit:cover;border-radius:3px;
+            border:1px solid var(--border-hi);flex-shrink:0}
+
+    /* Load History button */
+    #load-history-btn{
+      margin:6px 10px;padding:5px 12px;border-radius:6px;
+      background:rgba(0,200,255,.07);border:1px solid rgba(0,200,255,.2);
+      color:var(--cyan);font-size:10px;font-weight:600;letter-spacing:.5px;
+      cursor:pointer;text-transform:uppercase;transition:all .2s;text-align:center;
+    }
+    #load-history-btn:hover{background:rgba(0,200,255,.14)}
 
     /* ─── CARD ───────────────────────────────────────────────── */
     .card{
@@ -229,7 +262,6 @@
     }
     .wpn-item-icon{font-size:16px;flex-shrink:0}
     .wpn-item-name{flex:1;color:var(--text);font-weight:500}
-    .wpn-item-conf{font-family:var(--mono);font-size:9px;color:var(--muted)}
 
     /* ─── POSE ───────────────────────────────────────────────── */
     #pose-row{display:flex;align-items:center;gap:12px}
@@ -237,23 +269,136 @@
     #pose-anom{font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
     #pose-cnt {font-size:10px;color:var(--muted);margin-top:2px}
 
+    /* ─── ANPR PANEL ─────────────────────────────────────────── */
+    #anpr-plate-display{
+      font-family:var(--mono);font-size:22px;font-weight:700;
+      letter-spacing:3px;color:var(--cyan);
+      text-align:center;padding:10px 0 4px;min-height:42px;
+    }
+    #anpr-hit-badge{
+      display:none;margin:0 auto 8px;width:fit-content;
+      padding:3px 12px;border-radius:4px;font-size:10px;font-weight:700;
+      letter-spacing:1px;text-transform:uppercase;
+      background:rgba(255,40,40,.18);border:1px solid var(--red);color:var(--red);
+      animation:crit-pulse .8s ease-in-out infinite;
+    }
+    #anpr-hit-badge.visible{display:block}
+    #anpr-history{
+      max-height:90px;overflow-y:auto;padding:0 14px 8px;
+      display:flex;flex-direction:column;gap:3px;
+    }
+    #anpr-history::-webkit-scrollbar{width:3px}
+    #anpr-history::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px}
+    .anpr-hist-row{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:2px 8px;border-radius:4px;font-size:10px;
+      background:rgba(0,200,255,.05);border-left:2px solid var(--dim);
+      font-family:var(--mono);
+    }
+    .anpr-hist-row.hit{border-left-color:var(--red);background:rgba(255,40,40,.06)}
+    .anpr-hist-plate{color:var(--text);letter-spacing:1px}
+    .anpr-hist-badge{font-size:8px;padding:1px 5px;border-radius:3px;
+                     background:rgba(255,40,40,.2);color:var(--red);font-weight:700}
+
+    /* ─── FENCE PANEL ────────────────────────────────────────── */
+    #fence-zones{
+      padding:8px 14px;display:flex;flex-direction:column;gap:6px;
+    }
+    .zone-row{
+      display:flex;align-items:center;gap:8px;padding:5px 10px;
+      border-radius:7px;border:1px solid var(--border);
+      background:rgba(0,200,100,.03);transition:all .3s;
+    }
+    .zone-row.breached{
+      border-color:rgba(255,100,0,.5);background:rgba(255,100,0,.06);
+    }
+    .zone-row.critical{
+      border-color:var(--red);background:rgba(255,40,40,.08);
+      animation:crit-pulse .8s ease-in-out infinite;
+    }
+    .zone-dot{
+      width:8px;height:8px;border-radius:50%;
+      background:var(--green);flex-shrink:0;transition:background .3s;
+    }
+    .zone-dot.breached{background:var(--amber)}
+    .zone-dot.critical{background:var(--red);animation:blink .5s ease-in-out infinite}
+    .zone-name{flex:1;font-size:11px;font-weight:500;color:var(--text)}
+    .zone-dwell{
+      font-family:var(--mono);font-size:10px;color:var(--muted);
+      white-space:nowrap;
+    }
+    .zone-dwell.active{color:var(--amber)}
+    .fence-empty{
+      font-size:10px;color:var(--muted);text-align:center;padding:10px 0;
+    }
+
+    /* ─── VEHICLE PANEL ──────────────────────────────────────── */
+    #vehicle-counts{
+      display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
+      padding:10px 14px;
+    }
+    .veh-tile{
+      background:rgba(0,200,255,.05);border:1px solid var(--border);
+      border-radius:7px;padding:6px 4px;text-align:center;
+    }
+    .veh-tile-icon{font-size:18px;line-height:1.2}
+    .veh-tile-type{font-size:8px;color:var(--muted);text-transform:uppercase;
+                   letter-spacing:.5px;margin-top:1px}
+    .veh-tile-n{font-family:var(--mono);font-size:16px;font-weight:700;
+                color:var(--cyan);line-height:1}
+
     /* ─── STATS ROW ──────────────────────────────────────────── */
     #stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
     .stat{background:var(--bg-card);border:1px solid var(--border);
           border-radius:8px;padding:8px 10px;text-align:center}
     .stat-v{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--cyan);line-height:1}
     .stat-l{font-size:8px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:3px}
+
+    /* ─── SNAPSHOTS PANEL ────────────────────────────────────── */
+    #snap-grid{
+      display:grid;grid-template-columns:repeat(3,1fr);gap:5px;
+      padding:8px 14px 10px;
+    }
+    .snap-thumb{
+      position:relative;cursor:pointer;overflow:hidden;
+      border-radius:6px;border:1px solid var(--border);
+      aspect-ratio:4/3;background:var(--bg-panel);
+      transition:border-color .2s,transform .2s;
+    }
+    .snap-thumb:hover{border-color:var(--cyan);transform:scale(1.04)}
+    .snap-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+    .snap-no{font-size:10px;color:var(--muted);text-align:center;
+             padding:10px 0;grid-column:1/-1}
+
+    /* ─── LIGHTBOX ───────────────────────────────────────────── */
+    #lightbox{
+      position:fixed;inset:0;z-index:9999;
+      display:none;align-items:center;justify-content:center;
+      background:rgba(0,0,0,.88);
+    }
+    #lightbox.open{display:flex}
+    #lightbox img{
+      max-width:90vw;max-height:88vh;border-radius:8px;
+      border:1px solid var(--border-hi);
+      box-shadow:0 0 60px rgba(0,200,255,.2);
+    }
+    #lightbox-close{
+      position:absolute;top:18px;right:22px;
+      font-size:24px;color:var(--muted);cursor:pointer;
+      transition:color .2s;line-height:1;
+    }
+    #lightbox-close:hover{color:var(--cyan)}
   </style>
 </head>
 <body>
 
-<!-- HEADER -->
+<!-- ─── HEADER ─────────────────────────────────────────────────────────── -->
 <header id="hdr">
   <div class="hdr-left">
-    <div class="drone-ico">🛸</div>
+    <div class="drone-ico">🛡️</div>
     <div>
-      <h1>Drone Surveillance System</h1>
-      <div class="hdr-sub">Suspicious Activity Detection · AI-Powered · Real-Time</div>
+      <h1>IBVAP — Intelligent Border Video Analytics</h1>
+      <div class="hdr-sub">SIH 2026 · PS:SIH26187 · AI-Powered · Real-Time Border Surveillance</div>
     </div>
   </div>
   <div class="hdr-right">
@@ -265,16 +410,25 @@
   </div>
 </header>
 
-<!-- ROOT -->
+<!-- ─── ROOT ─────────────────────────────────────────────────────────────── -->
 <div id="root">
 
-  <!-- LEFT COLUMN -->
+  <!-- ── LEFT COLUMN ──────────────────────────────────────────────────── -->
   <div id="left-col">
+
+    <!-- CAMERA SWITCHER -->
+    <div id="cam-switcher">
+      <span class="cam-label">Camera:</span>
+      <div id="cam-pills"><!-- JS renders pills --></div>
+    </div>
 
     <!-- VIDEO -->
     <div id="video-panel">
       <div class="panel-hdr">
-        <span class="panel-title">Live Camera Feed</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="panel-title">Live Camera Feed</span>
+          <span id="cam-name-hdr" style="color:var(--muted)">—</span>
+        </div>
         <div style="display:flex;align-items:center;gap:10px">
           <span class="panel-badge" id="fps-badge">0.0 FPS</span>
           <span id="live-dot">LIVE</span>
@@ -287,18 +441,21 @@
       </div>
     </div>
 
-    <!-- TIMELINE -->
+    <!-- TIMELINE + EVENT LOG -->
     <div id="timeline">
       <div class="panel-hdr">
         <span class="panel-title">Alert Timeline</span>
         <span class="panel-badge" id="ev-badge">0 events</span>
       </div>
-      <div id="alert-list"></div>
+      <div id="timeline-inner">
+        <div id="alert-list"></div>
+      </div>
+      <div id="load-history-btn" onclick="loadHistory()">⬇ Load History</div>
     </div>
 
   </div><!-- /left-col -->
 
-  <!-- RIGHT COLUMN -->
+  <!-- ── RIGHT COLUMN ─────────────────────────────────────────────────── -->
   <div id="right-col">
 
     <!-- THREAT GAUGE -->
@@ -350,7 +507,6 @@
             <div id="wpn-sub">No weapons detected</div>
           </div>
         </div>
-        <!-- Detected weapon list rendered by JS -->
         <div id="wpn-list"></div>
       </div>
     </div>
@@ -372,6 +528,48 @@
       </div>
     </div>
 
+    <!-- ANPR PANEL -->
+    <div class="card" id="anpr-card">
+      <div class="panel-hdr">
+        <span class="panel-title">ANPR · Number Plate</span>
+        <span class="panel-badge" id="anpr-badge">—</span>
+      </div>
+      <div id="anpr-plate-display">—</div>
+      <div id="anpr-hit-badge">⚠ WATCHLIST HIT</div>
+      <div id="anpr-history"></div>
+    </div>
+
+    <!-- VIRTUAL FENCE PANEL -->
+    <div class="card" id="fence-card">
+      <div class="panel-hdr">
+        <span class="panel-title">Virtual Fence Zones</span>
+        <span class="panel-badge" id="fence-badge">Loading…</span>
+      </div>
+      <div id="fence-zones">
+        <div class="fence-empty">Loading zone data…</div>
+      </div>
+    </div>
+
+    <!-- VEHICLE PANEL -->
+    <div class="card" id="vehicle-card">
+      <div class="panel-hdr">
+        <span class="panel-title">Vehicle Detection</span>
+        <span class="panel-badge" id="vehicle-badge">COCO-80</span>
+      </div>
+      <div id="vehicle-counts">
+        <div class="veh-tile"><div class="veh-tile-icon">🚗</div><div class="veh-tile-type">Cars</div><div class="veh-tile-n" id="vc-car">0</div></div>
+        <div class="veh-tile"><div class="veh-tile-icon">🚛</div><div class="veh-tile-type">Trucks</div><div class="veh-tile-n" id="vc-truck">0</div></div>
+        <div class="veh-tile"><div class="veh-tile-icon">🏍</div><div class="veh-tile-type">Bikes</div><div class="veh-tile-n" id="vc-bike">0</div></div>
+        <div class="veh-tile"><div class="veh-tile-icon">🚌</div><div class="veh-tile-type">Buses</div><div class="veh-tile-n" id="vc-bus">0</div></div>
+        <div class="veh-tile"><div class="veh-tile-icon">🚲</div><div class="veh-tile-type">Bicycles</div><div class="veh-tile-n" id="vc-bicycle">0</div></div>
+        <div class="veh-tile" style="background:rgba(0,200,255,.03)">
+          <div class="veh-tile-icon">🚧</div>
+          <div class="veh-tile-type">Total</div>
+          <div class="veh-tile-n" id="vc-total">0</div>
+        </div>
+      </div>
+    </div>
+
     <!-- STATS -->
     <div id="stats-row">
       <div class="stat"><div class="stat-v" id="s-alerts">0</div><div class="stat-l">Alerts</div></div>
@@ -379,9 +577,26 @@
       <div class="stat"><div class="stat-v" id="s-up">0s</div><div class="stat-l">Uptime</div></div>
     </div>
 
+    <!-- SNAPSHOTS PANEL -->
+    <div class="card" id="snap-card">
+      <div class="panel-hdr">
+        <span class="panel-title">Recent Captures</span>
+        <span class="panel-badge" id="snap-badge">0 files</span>
+      </div>
+      <div id="snap-grid">
+        <div class="snap-no">No captures yet</div>
+      </div>
+    </div>
+
   </div><!-- /right-col -->
 
 </div><!-- /root -->
+
+<!-- LIGHTBOX -->
+<div id="lightbox" onclick="closeLightbox()">
+  <span id="lightbox-close" onclick="closeLightbox()">✕</span>
+  <img id="lightbox-img" src="" alt="Snapshot"/>
+</div>
 
 <script>
 /* ══ CONSTANTS ══════════════════════════════════════════════════ */
@@ -390,46 +605,30 @@ const EMO_COLS ={angry:'#ff4040',disgust:'#20b080',fear:'#c060ff',happy:'#00dc78
 const POSE_ICONS={normal:'🧍',raised_hands:'🙌',aggressive_stance:'🤜',crouching:'🫳',running:'🏃'};
 const POSE_COLS ={normal:'var(--green)',raised_hands:'var(--cyan)',aggressive_stance:'var(--red)',crouching:'var(--amber)',running:'var(--amber)'};
 const EMOTIONS  =['angry','disgust','fear','happy','neutral','sad','surprise'];
-
-// Weapon class → display icon
-const WPN_ICONS={
-  pistol:'🔫',
-  knife:'🗡️',
-  gun:'🔫',
-  rifle:'🪖',
-  firearm:'🔫',
-  blade:'🗡️',
-  machete:'🗡️',
-  sword:'⚔️',
-  baton:'🪃',
-  taser:'⚡',
-  explosive:'💣',
-};
-// Weapon label → threat colour
-const WPN_TIER_COL={
-  pistol:'var(--red)',
-  knife:'var(--amber)',
-};
+const WPN_ICONS ={pistol:'🔫',knife:'🗡️',gun:'🔫',rifle:'🪖',firearm:'🔫',blade:'🗡️',machete:'🗡️',sword:'⚔️',baton:'🪃',taser:'⚡',explosive:'💣'};
+const WPN_TIER_COL={pistol:'var(--red)',knife:'var(--amber)'};
 
 /* ══ STATE ══════════════════════════════════════════════════════ */
-let _alerts=0, _crits=0, _start=Date.now(), _ws=null, _retryMs=1000;
-let _lastAlertLevel='INFO', _lastAlertTs=0;
-const ALERT_DEDUP_MS = 8000;  // min ms between timeline entries at same level
+let _alerts=0,_crits=0,_start=Date.now(),_ws=null,_retryMs=1000;
+let _lastAlertLevel='INFO',_lastAlertTs=0;
+const ALERT_DEDUP_MS=8000;
+let _activeCam='';       // currently selected camera ID
+let _cameras=[];         // [{id,name,status,zones,...}]
+let _anprHistory=[];     // last 10 plates this session
+let _zoneStates={};      // zone_id → {dwell_sec, is_critical, breached}
 
 /* ══ GAUGE ══════════════════════════════════════════════════════ */
 const DASH=252;
 function setGauge(score){
   const p=Math.min(score/10,1);
   const color=p<.4?'#00dc78':p<.7?'#ffaa00':'#ff2828';
-  const fill=document.getElementById('g-fill');
-  const val =document.getElementById('g-val');
-  fill.style.strokeDashoffset=DASH*(1-p);
-  fill.style.stroke=color;
-  val.textContent=score;
-  val.style.fill=color;
+  document.getElementById('g-fill').style.strokeDashoffset=DASH*(1-p);
+  document.getElementById('g-fill').style.stroke=color;
+  document.getElementById('g-val').textContent=score;
+  document.getElementById('g-val').style.fill=color;
 }
 
-/* ══ INIT EMOTION BARS ══════════════════════════════════════════ */
+/* ══ EMOTION BARS ═══════════════════════════════════════════════ */
 function initBars(){
   const c=document.getElementById('ebo-bars');
   c.innerHTML=EMOTIONS.map(e=>`
@@ -440,8 +639,157 @@ function initBars(){
     </div>`).join('');
 }
 
-/* ══ RENDER STATE (called every WS message) ═════════════════════ */
+/* ══ CAMERA SWITCHER ════════════════════════════════════════════ */
+async function loadCameras(){
+  try{
+    const r=await fetch('/api/cameras');
+    const d=await r.json();
+    _cameras=d.cameras||[];
+    renderCamPills();
+    renderFenceZones();
+    if(!_activeCam&&_cameras.length>0) switchCamera(_cameras[0].id);
+  }catch(e){console.warn('[Cams]',e);}
+}
+
+function renderCamPills(){
+  const container=document.getElementById('cam-pills');
+  container.innerHTML=_cameras.map(cam=>`
+    <div class="cam-pill${_activeCam===cam.id?' active':''}"
+         id="pill-${cam.id}"
+         onclick="switchCamera('${cam.id}')">
+      <div class="cam-status-dot${cam.status==='live'?' live':''}"></div>
+      ${cam.name}
+    </div>`).join('');
+}
+
+function switchCamera(camId){
+  _activeCam=camId;
+  // Update video feed src
+  const vf=document.getElementById('vfeed');
+  vf.src=`/video_feed?camera=${encodeURIComponent(camId)}&_=${Date.now()}`;
+  // Update camera name in header
+  const cam=_cameras.find(c=>c.id===camId);
+  document.getElementById('cam-name-hdr').textContent=cam?cam.name:'';
+  // Re-render pills (active highlight)
+  _cameras.forEach(c=>{
+    const pill=document.getElementById(`pill-${c.id}`);
+    if(pill) pill.className='cam-pill'+(c.id===camId?' active':'');
+  });
+  // Re-render fence zones for this camera
+  renderFenceZones();
+}
+
+/* ══ FENCE ZONES ════════════════════════════════════════════════ */
+function renderFenceZones(){
+  const cam=_cameras.find(c=>c.id===_activeCam);
+  const container=document.getElementById('fence-zones');
+  const badge=document.getElementById('fence-badge');
+
+  if(!cam||!cam.zones||cam.zones.length===0){
+    container.innerHTML='<div class="fence-empty">No zones configured for this camera</div>';
+    badge.textContent='0 zones';
+    return;
+  }
+
+  badge.textContent=`${cam.zones.filter(z=>z.enabled!==false).length} zones`;
+  container.innerHTML=cam.zones.map(z=>{
+    const st=_zoneStates[z.id]||{};
+    const cls=st.is_critical?'critical':st.breached?'breached':'';
+    const dotCls=st.is_critical?'critical':st.breached?'breached':'';
+    const dwellTxt=st.breached?`${(st.dwell_sec||0).toFixed(1)}s`:'Clear';
+    const dwellCls=st.breached?'active':'';
+    return `<div class="zone-row ${cls}" id="zone-row-${z.id}">
+      <div class="zone-dot ${dotCls}" id="zone-dot-${z.id}"></div>
+      <div class="zone-name">${z.name||z.id}</div>
+      <div class="zone-dwell ${dwellCls}" id="zone-dwell-${z.id}">${dwellTxt}</div>
+    </div>`;
+  }).join('');
+}
+
+function updateFenceZones(breaches){
+  // Reset all zone states
+  const newStates={};
+  for(const b of (breaches||[])){
+    const existing=newStates[b.zone_id]||{};
+    newStates[b.zone_id]={
+      breached:true,
+      dwell_sec:Math.max(existing.dwell_sec||0,b.dwell_sec||0),
+      is_critical:existing.is_critical||b.is_critical,
+    };
+  }
+  _zoneStates=newStates;
+
+  // Update DOM
+  const cam=_cameras.find(c=>c.id===_activeCam);
+  if(!cam||!cam.zones) return;
+  for(const z of cam.zones){
+    const st=_zoneStates[z.id]||{};
+    const row=document.getElementById(`zone-row-${z.id}`);
+    const dot=document.getElementById(`zone-dot-${z.id}`);
+    const dwell=document.getElementById(`zone-dwell-${z.id}`);
+    if(!row) continue;
+    row.className='zone-row'+(st.is_critical?' critical':st.breached?' breached':'');
+    if(dot) dot.className='zone-dot'+(st.is_critical?' critical':st.breached?' breached':'');
+    if(dwell){
+      dwell.textContent=st.breached?`${(st.dwell_sec||0).toFixed(1)}s`:'Clear';
+      dwell.className='zone-dwell'+(st.breached?' active':'');
+    }
+  }
+}
+
+/* ══ ANPR PANEL ═════════════════════════════════════════════════ */
+function updateANPR(plates, hits, watchlistHit){
+  const display=document.getElementById('anpr-plate-display');
+  const hitBadge=document.getElementById('anpr-hit-badge');
+  const badge=document.getElementById('anpr-badge');
+  const history=document.getElementById('anpr-history');
+
+  if(plates&&plates.length>0){
+    const topPlate=plates[0]||'—';
+    display.textContent=topPlate||'—';
+    badge.textContent=`${plates.length} plate${plates.length!==1?'s':''}`;
+
+    // Watchlist hit badge
+    hitBadge.className=watchlistHit?'visible':'';
+
+    // Update ANPR history (session)
+    for(const p of plates){
+      if(p&&!_anprHistory.find(h=>h.plate===p&&h.ts>Date.now()-5000)){
+        _anprHistory.unshift({plate:p,ts:Date.now(),hit:hits&&hits.includes(p)});
+        if(_anprHistory.length>10) _anprHistory.pop();
+      }
+    }
+    history.innerHTML=_anprHistory.map(h=>`
+      <div class="anpr-hist-row${h.hit?' hit':''}">
+        <span class="anpr-hist-plate">${h.plate}</span>
+        ${h.hit?'<span class="anpr-hist-badge">WATCHLIST</span>':''}
+      </div>`).join('');
+  }else{
+    display.textContent='—';
+    hitBadge.className='';
+    badge.textContent='—';
+  }
+}
+
+/* ══ VEHICLE PANEL ══════════════════════════════════════════════ */
+function updateVehicle(counts){
+  const c=counts||{};
+  document.getElementById('vc-car').textContent=c.car||0;
+  document.getElementById('vc-truck').textContent=c.truck||0;
+  document.getElementById('vc-bike').textContent=c.motorcycle||0;
+  document.getElementById('vc-bus').textContent=c.bus||0;
+  document.getElementById('vc-bicycle').textContent=c.bicycle||0;
+  const total=Object.values(c).reduce((a,b)=>a+b,0);
+  document.getElementById('vc-total').textContent=total;
+  document.getElementById('vehicle-badge').textContent=
+    total>0?`${total} vehicle${total!==1?'s':''} detected`:'No vehicles';
+}
+
+/* ══ RENDER (called on every WS message) ════════════════════════ */
 function render(s){
+  // Only render if this is for the active camera (or if no camera selected yet)
+  if(_activeCam&&s.camera_id&&s.camera_id!==_activeCam) return;
+
   setGauge(s.threat_score||0);
   const lv=document.getElementById('alert-lv');
   lv.textContent=s.alert_level;
@@ -449,6 +797,11 @@ function render(s){
 
   document.getElementById('persons-badge').textContent=
     `${s.num_persons||0} person${(s.num_persons||0)!==1?'s':''}`;
+
+  // Camera name in video header
+  if(s.camera_name){
+    document.getElementById('cam-name-hdr').textContent=s.camera_name;
+  }
 
   // Emotion
   const emo=s.emotion||'neutral';
@@ -460,8 +813,8 @@ function render(s){
   document.getElementById('emo-conf').textContent=conf;
   for(const[k,v] of Object.entries(s.emotion_scores||{})){
     const b=document.getElementById(`eb-${k}`),p=document.getElementById(`ep-${k}`);
-    if(b)b.style.width=Math.round(v*100)+'%';
-    if(p)p.textContent=Math.round(v*100)+'%';
+    if(b) b.style.width=Math.round(v*100)+'%';
+    if(p) p.textContent=Math.round(v*100)+'%';
   }
 
   // Weapon
@@ -471,20 +824,18 @@ function render(s){
   const wc=document.getElementById('wpn-card');
   const wl=document.getElementById('wpn-list');
   const wbadge=document.getElementById('wpn-badge');
-  const labels  = s.weapon_labels         || [];
-  const dispLbls= s.weapon_display_labels || [];
-  if(s.weapon_detected && labels.length > 0){
+  const labels=s.weapon_labels||[];
+  const dispLbls=s.weapon_display_labels||[];
+  if(s.weapon_detected&&labels.length>0){
     wi.classList.add('hot');
-    wst.textContent='DETECTED';
-    wst.style.color='var(--red)';
+    wst.textContent='DETECTED'; wst.style.color='var(--red)';
     wb.textContent=`${labels.length} weapon${labels.length!==1?'s':''} detected`;
     wc.classList.add('crit');
     wbadge.textContent=`${labels.length} DETECTED`;
-    // Build per-weapon rows
     wl.innerHTML=labels.map((lbl,i)=>{
       const disp=dispLbls[i]||lbl;
-      const icon=WPN_ICONS[lbl]||WPN_ICONS[lbl.split('/')[0].trim().toLowerCase()]||'⚠️';
-      const col =WPN_TIER_COL[lbl]||'var(--amber)';
+      const icon=WPN_ICONS[lbl]||'⚠️';
+      const col=WPN_TIER_COL[lbl]||'var(--amber)';
       return `<div class="wpn-item">
         <span class="wpn-item-icon">${icon}</span>
         <span class="wpn-item-name" style="color:${col}">${disp}</span>
@@ -492,8 +843,7 @@ function render(s){
     }).join('');
   }else{
     wi.classList.remove('hot');
-    wst.textContent='CLEAR';
-    wst.style.color='var(--green)';
+    wst.textContent='CLEAR'; wst.style.color='var(--green)';
     wb.textContent='No weapons detected';
     wc.classList.remove('crit');
     wbadge.textContent='ONNX · 2-Class';
@@ -515,33 +865,40 @@ function render(s){
   if(s.alert_level==='WARNING') tc.classList.add('warn');
   if(s.alert_level==='CRITICAL') tc.classList.add('crit');
 
-  // Stats counters
+  // ANPR
+  updateANPR(s.anpr_plates, s.anpr_hits, s.anpr_watchlist_hit);
+
+  // Fence
+  updateFenceZones(s.fence_breaches);
+
+  // Vehicle
+  updateVehicle(s.vehicle_counts);
+
+  // Stats
   document.getElementById('s-alerts').textContent=_alerts;
   document.getElementById('s-crit').textContent=_crits;
 }
 
-/* ══ TIMELINE (WARNING/CRITICAL only, 5s dedup) ═════════════════ */
+/* ══ TIMELINE ═══════════════════════════════════════════════════ */
 const MAX_ROWS=60;
 function buildMsg(s){
   const p=[];
   const labels=s.weapon_labels||[];
-  const disp  =s.weapon_display_labels||[];
-  if(s.weapon_detected && labels.length>0){
-    const wpnStr=disp.length>0?disp.join(', '):labels.join(', ');
-    p.push('Weapon: '+wpnStr);
-  }
+  const disp=s.weapon_display_labels||[];
+  if(s.weapon_detected&&labels.length>0) p.push('Weapon: '+(disp.length?disp.join(', '):labels.join(', ')));
   if(s.emotion&&s.emotion!=='neutral') p.push('Emotion: '+s.emotion);
   if(s.pose_anomaly&&s.pose_anomaly!=='normal') p.push('Pose: '+s.pose_anomaly.replace(/_/g,' '));
+  if(s.fence_has_breach) p.push(s.fence_has_critical?'⚠ Zone breach (CRITICAL)':'Zone breach');
+  if(s.anpr_watchlist_hit) p.push('Plate hit: '+(s.anpr_hits||[]).join(', '));
   return p.length?p.join(' · '):'Suspicious activity detected';
 }
+
 function pushAlert(s){
-  // Only log WARNING or CRITICAL
   if(s.alert_level==='INFO') return;
   const now=Date.now();
-  const levelChanged = s.alert_level !== _lastAlertLevel;
-  const cooldownPassed = (now - _lastAlertTs) >= ALERT_DEDUP_MS;
-  // Log on level transition OR after the dedup window
-  if(!levelChanged && !cooldownPassed) return;
+  const levelChanged=s.alert_level!==_lastAlertLevel;
+  const cooldownPassed=(now-_lastAlertTs)>=ALERT_DEDUP_MS;
+  if(!levelChanged&&!cooldownPassed) return;
   _lastAlertTs=now;
   _lastAlertLevel=s.alert_level;
 
@@ -559,6 +916,72 @@ function pushAlert(s){
   if(s.alert_level==='CRITICAL') _crits++;
   document.getElementById('ev-badge').textContent=`${_alerts} events`;
 }
+
+/* ══ LOAD HISTORY FROM DB ═══════════════════════════════════════ */
+async function loadHistory(){
+  try{
+    const params=_activeCam?`?camera=${encodeURIComponent(_activeCam)}&limit=50`:'?limit=50';
+    const r=await fetch('/api/events'+params);
+    const d=await r.json();
+    const list=document.getElementById('alert-list');
+    const events=d.events||[];
+    if(!events.length){
+      const row=document.createElement('div');
+      row.className='alert-row INFO';
+      row.innerHTML='<span class="a-msg" style="color:var(--muted)">No historical events found.</span>';
+      list.appendChild(row);
+      return;
+    }
+    for(const ev of events){
+      const row=document.createElement('div');
+      row.className=`alert-row ${ev.alert_level}`;
+      const ts=new Date(ev.timestamp).toLocaleString('en-GB',{hour12:false,dateStyle:'short',timeStyle:'medium'});
+      let snapHtml='';
+      if(ev.snapshot_path){
+        const fn=ev.snapshot_path.split(/[\\/]/).pop();
+        snapHtml=`<img class="a-snap" src="/snapshots/${encodeURIComponent(fn)}"
+          alt="snap" onclick="event.stopPropagation();openLightbox('/snapshots/${encodeURIComponent(fn)}')"/>`;
+      }
+      row.innerHTML=`<span class="a-ts">${ts}</span>
+        <span class="a-badge ${ev.alert_level}">${ev.alert_level}</span>
+        <span class="a-msg">${ev.emotion}${ev.weapon_detected?' · Weapon':''}</span>
+        <span class="a-score">${ev.threat_score}/10</span>
+        ${snapHtml}`;
+      row.onclick=()=>ev.snapshot_path&&openLightbox('/snapshots/'+ev.snapshot_path.split(/[\\/]/).pop());
+      list.appendChild(row);
+    }
+  }catch(e){console.warn('[History]',e);}
+}
+
+/* ══ SNAPSHOTS ══════════════════════════════════════════════════ */
+async function loadSnapshots(){
+  try{
+    const r=await fetch('/api/snapshots');
+    const d=await r.json();
+    const snaps=d.snapshots||[];
+    const grid=document.getElementById('snap-grid');
+    document.getElementById('snap-badge').textContent=`${snaps.length} file${snaps.length!==1?'s':''}`;
+    if(!snaps.length){
+      grid.innerHTML='<div class="snap-no">No captures yet</div>';
+      return;
+    }
+    grid.innerHTML=snaps.slice(0,12).map(s=>`
+      <div class="snap-thumb" onclick="openLightbox('/snapshots/${encodeURIComponent(s.filename)}')">
+        <img src="/snapshots/${encodeURIComponent(s.filename)}" alt="${s.filename}" loading="lazy"/>
+      </div>`).join('');
+  }catch(e){}
+}
+
+/* ══ LIGHTBOX ═══════════════════════════════════════════════════ */
+function openLightbox(src){
+  document.getElementById('lightbox-img').src=src;
+  document.getElementById('lightbox').classList.add('open');
+}
+function closeLightbox(){
+  document.getElementById('lightbox').classList.remove('open');
+  document.getElementById('lightbox-img').src='';
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape') closeLightbox();});
 
 /* ══ WEBSOCKET ══════════════════════════════════════════════════ */
 function connect(){
@@ -593,32 +1016,33 @@ function pollFallback(){
     try{
       const r=await fetch('/api/status');
       const d=await r.json();
-      render(d);  // update panels only, no pushAlert
+      // d is keyed by camera_id
+      for(const[camId,state] of Object.entries(d)){
+        if(!_activeCam||camId===_activeCam) render(state);
+      }
     }catch(e){}
   },2000);
 }
 
-/* ══ FPS estimation (canvas pixel-diff — works with MJPEG) ════════ */
-let _fpsCount=0, _fpsT=Date.now();
+/* ══ FPS TRACKING ═══════════════════════════════════════════════ */
+let _fpsCount=0,_fpsT=Date.now();
 function trackFps(){
   const vid=document.getElementById('vfeed');
   const cvs=document.createElement('canvas');
-  cvs.width=4; cvs.height=4;          // tiny — just enough to detect change
+  cvs.width=4;cvs.height=4;
   const ctx=cvs.getContext('2d',{willReadFrequently:true});
   let lastPx=null;
-
   function sample(){
     if(vid.naturalWidth===0){requestAnimationFrame(sample);return;}
     ctx.drawImage(vid,0,0,4,4);
     const px=ctx.getImageData(0,0,4,4).data.join(',');
     if(px!==lastPx){
-      lastPx=px;
-      _fpsCount++;
+      lastPx=px;_fpsCount++;
       const now=Date.now();
       if(now-_fpsT>=2000){
         const fps=(_fpsCount/((now-_fpsT)/1000)).toFixed(1);
         document.getElementById('fps-badge').textContent=`${fps} FPS`;
-        _fpsCount=0; _fpsT=now;
+        _fpsCount=0;_fpsT=now;
       }
     }
     requestAnimationFrame(sample);
@@ -639,13 +1063,21 @@ function tick(){
 window.addEventListener('DOMContentLoaded',()=>{
   initBars();
   setGauge(0);
+  loadCameras();
   connect();
   pollFallback();
   trackFps();
   setInterval(tick,1000);
   tick();
+  // Reload snapshots every 10s
+  loadSnapshots();
+  setInterval(loadSnapshots,10000);
+  // Reload camera list every 15s (to get live status updates)
+  setInterval(loadCameras,15000);
   const vf=document.getElementById('vfeed');
-  vf.addEventListener('error',()=>setTimeout(()=>{vf.src='/video_feed?_='+Date.now();},2000));
+  vf.addEventListener('error',()=>setTimeout(()=>{
+    vf.src=`/video_feed?camera=${encodeURIComponent(_activeCam)}&_=`+Date.now();
+  },2000));
 });
 </script>
 </body>

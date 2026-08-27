@@ -73,11 +73,13 @@ class WeaponDetector:
             self.session = ort.InferenceSession(
                 MODEL_WEAPON, sess_options=opts, providers=ONNX_PROVIDERS,
             )
-        except Exception:
-            print("[WeaponDetector] GPU failed, using CPU")
+        except Exception as e:
+            print(f"[WeaponDetector] GPU load failed: {e}, using CPU with no optimization")
+            opts2 = ort.SessionOptions()
+            opts2.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+            opts2.log_severity_level = 4
             self.session = ort.InferenceSession(
-                MODEL_WEAPON, sess_options=opts,
-                providers=["CPUExecutionProvider"],
+                MODEL_WEAPON, sess_options=opts2, providers=["CPUExecutionProvider"],
             )
 
         inp = self.session.get_inputs()[0]

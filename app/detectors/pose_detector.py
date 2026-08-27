@@ -91,10 +91,13 @@ class PoseDetector:
             self.session = ort.InferenceSession(
                 MODEL_POSE, sess_options=opts, providers=ONNX_PROVIDERS,
             )
-        except Exception:
-            print("[PoseDetector] GPU load failed, using CPU")
+        except Exception as e:
+            print(f"[PoseDetector] GPU load failed: {e}, using CPU with no optimization")
+            opts2 = ort.SessionOptions()
+            opts2.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+            opts2.log_severity_level = 4
             self.session = ort.InferenceSession(
-                MODEL_POSE, sess_options=opts, providers=["CPUExecutionProvider"],
+                MODEL_POSE, sess_options=opts2, providers=["CPUExecutionProvider"],
             )
 
         self.input_name = self.session.get_inputs()[0].name

@@ -1,0 +1,159 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# IBVAP — Intelligent Border Video Analytics Platform
+# Camera & Stream Configuration  (cameras.yaml)
+#
+# HOW TO SWITCH VIDEO SOURCE:
+#   For each camera, uncomment EXACTLY ONE "source:" line.
+#   All other source lines must remain commented out.
+#   Restart the server after any change here.
+#
+# QUICK-START OPTIONS (per camera):
+#   Option 1 — Laptop webcam:    uncomment:  source: 0
+#   Option 2 — Looped test MP4:  uncomment:  source: "data/test_videos/sample.mp4"
+#   Option 3 — VLC fake RTSP:    uncomment:  source: "rtsp://localhost:8554/stream"
+#                                 (Run VLC → Media → Stream → RTSP on port 8554)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+cameras:
+
+  # ─── CAMERA 1: Main Gate ─────────────────────────────────────────────────────
+  - id: "CAM_01"
+    name: "Main Gate"
+
+    # ┌─ SOURCE — uncomment EXACTLY ONE line ────────────────────────────────────
+    #
+    # OPTION 1: Laptop/desktop webcam (no extra setup needed)
+    # source: 0                                        # default webcam
+    # source: 1                                        # second USB camera
+    #
+    # OPTION 2a: Pexels surveillance footage — re-encoded (960x540 → 426x240 @ 30fps, no codec warnings)
+    source: "data/test_videos/surveillance_clean.mp4"  # ← ACTIVE
+    #
+    # OPTION 2b: Original Pexels download (H.264 — works but may log codec warnings)
+    # source: "data/test_videos/pexels_surveillance.mp4"
+    #
+    # OPTION 2c: Synthetic generated test video (always available, no downloads needed)
+    # source: "data/test_videos/sample_generated.mp4"
+    #
+    # OPTION 3: VLC fake RTSP stream (simulate a real IP camera)
+    # To start the VLC RTSP server:
+    #   vlc --intf dummy data/test_videos/sample.mp4 :sout='#rtp{sdp=rtsp://:8554/stream}' :sout-keep
+    # source: "rtsp://localhost:8554/stream"
+    #
+    # OPTION 4: Real IP camera RTSP (replace IP/credentials)
+    # source: "rtsp://admin:password@192.168.1.64/stream"
+    # source: "rtsp://admin:password@192.168.1.64/Streaming/Channels/101"
+    #
+    # OPTION 5: MJPEG HTTP stream (e.g. RPi with mjpg-streamer)
+    # source: "http://192.168.1.100:8080/?action=stream"
+    # source: "http://10.156.86.179:8080/?action=stream"
+    #
+    # └──────────────────────────────────────────────────────────────────────────
+
+    loop: true           # loop if source is a local MP4 file; ignored for live streams
+    night_mode: false    # set true to enable CLAHE pre-processor for low-light
+    fps_limit: 30        # cap processing FPS (saves GPU; 0 = unlimited)
+
+    # Virtual fence zones — polygon points in [x, y] normalised 0.0-1.0 coords.
+    # Left-click vertices interactively with: python tools/draw_zones.py --camera CAM_01
+    zones:
+      - id: "ZONE_A"
+        name: "Perimeter North"
+        # Polygon: top-left to bottom-right of left half of frame
+        points:
+          - [0.05, 0.20]
+          - [0.50, 0.20]
+          - [0.50, 0.90]
+          - [0.05, 0.90]
+        dwell_threshold_sec: 3.0   # CRITICAL breach after person is inside for 3 s
+        enabled: true
+
+      - id: "ZONE_B"
+        name: "Restricted East Wing"
+        points:
+          - [0.60, 0.10]
+          - [0.95, 0.10]
+          - [0.95, 0.80]
+          - [0.60, 0.80]
+        dwell_threshold_sec: 5.0
+        enabled: false              # disabled — enable when needed
+
+
+  # ─── CAMERA 2: Vehicle Entry ──────────────────────────────────────────────────
+  - id: "CAM_02"
+    name: "Vehicle Entry"
+
+    # ┌─ SOURCE — uncomment EXACTLY ONE line ────────────────────────────────────
+    #
+    # OPTION 1: Laptop webcam (second camera index, or same webcam for testing)
+    # source: 0                                        # default webcam (share with CAM_01 for demo)
+    # source: 1                                        # second USB camera (if available)
+    #
+    # OPTION 2a: Pexels surveillance footage — re-encoded (no codec warnings)
+    source: "data/test_videos/surveillance_clean.mp4"  # ← ACTIVE
+    #
+    # OPTION 2b: Original Pexels download (H.264)
+    # source: "data/test_videos/pexels_surveillance.mp4"
+    #
+    # OPTION 2c: Synthetic generated test video
+    # source: "data/test_videos/sample_generated.mp4"
+    #
+    # OPTION 3: VLC fake RTSP on a different port
+    # source: "rtsp://localhost:8555/stream"            # different port for second camera
+    #
+    # OPTION 4: Real IP camera RTSP
+    # source: "rtsp://admin:password@192.168.1.65/stream"
+    #
+    # └──────────────────────────────────────────────────────────────────────────
+
+    loop: true
+    night_mode: false
+    fps_limit: 25
+    zones: []
+
+
+# ─── GLOBAL SETTINGS ──────────────────────────────────────────────────────────
+settings:
+
+  # ── ANPR (Automatic Number Plate Recognition) ───────────────────────────────
+  anpr:
+    enabled: true
+    # YOLOv11n fine-tuned on Indian LP dataset.
+    # If this file is missing, ANPR is silently disabled — no crash.
+    # Train with: python tools/train_anpr.py
+    model: "models/anpr_plate_detect.onnx"
+    ocr_engine: "easyocr"           # only "easyocr" supported currently
+    watchlist_file: "data/watchlist/plates.json"
+    # plates.json format: {"plates": ["MH12AB1234", "DL01AB0001"]}
+    confidence_threshold: 0.5
+
+  # ── Face Recognition System (FRS) ──────────────────────────────────────────
+  frs:
+    enabled: true
+    model: "models/yolov8n-face.onnx"   # already in repo (used by EmotionDetector too)
+    embeddings_dir: "data/faces/"        # .npy files per identity, e.g. person_name.npy
+    match_threshold: 0.6                 # cosine similarity (higher = stricter match)
+
+  # ── Night Mode (CLAHE) ──────────────────────────────────────────────────────
+  night_mode:
+    clip_limit: 2.0       # CLAHE contrast limit (higher = more aggressive)
+    tile_grid: [8, 8]     # localised histogram tile size
+
+  # ── Alert / Event Logging ───────────────────────────────────────────────────
+  logging:
+    db_path: "data/databases/events.db"   # SQLite database (auto-created)
+    snapshots_dir: "data/snapshots/"      # CRITICAL event frames saved here
+    max_snapshots: 500                    # auto-delete oldest when limit exceeded
+
+  # ── C2 Webhook (Command & Control) ─────────────────────────────────────────
+  c2:
+    # Leave webhook_url as "" to disable entirely (no HTTP calls made).
+    webhook_url: ""
+    # webhook_url: "http://your-c2-server/api/alerts"
+    retry_attempts: 3
+    timeout_sec: 5
+
+  # ── Prometheus Metrics ──────────────────────────────────────────────────────
+  prometheus:
+    enabled: true
+    port: 8001     # metrics exposed on GET /metrics of the main FastAPI app

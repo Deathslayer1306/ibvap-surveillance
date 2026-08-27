@@ -59,11 +59,14 @@ class EmotionDetector:
                 sess_options=opts,
                 providers=ONNX_PROVIDERS,
             )
-        except Exception:
-            print("[EmotionDetector] Face GPU load failed, falling back to CPU")
+        except Exception as e:
+            print(f"[EmotionDetector] Face GPU load failed: {e}, falling back to CPU")
+            opts2 = ort.SessionOptions()
+            opts2.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+            opts2.log_severity_level = 4
             self.face_session = ort.InferenceSession(
                 MODEL_FACE,
-                sess_options=opts,
+                sess_options=opts2,
                 providers=["CPUExecutionProvider"],
             )
         self.face_input  = self.face_session.get_inputs()[0].name
@@ -75,11 +78,14 @@ class EmotionDetector:
                 sess_options=opts,
                 providers=ONNX_PROVIDERS,
             )
-        except Exception:
-            print("[EmotionDetector] Emotion GPU load failed, falling back to CPU")
+        except Exception as e:
+            print(f"[EmotionDetector] Emotion GPU load failed: {e}, falling back to CPU")
+            opts2 = ort.SessionOptions()
+            opts2.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+            opts2.log_severity_level = 4
             self.emotion_session = ort.InferenceSession(
                 MODEL_EMOTION,
-                sess_options=opts,
+                sess_options=opts2,
                 providers=["CPUExecutionProvider"],
             )
         self.emotion_input  = self.emotion_session.get_inputs()[0].name
