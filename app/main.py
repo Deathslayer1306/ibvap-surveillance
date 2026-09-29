@@ -60,8 +60,10 @@ import cv2
 import numpy as np
 import uvicorn
 import yaml
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, Response, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 # ── Existing detectors ───────────────────────────────────────────────────────
 from app.detectors.weapon_detector   import WeaponDetector,  WeaponResult
@@ -174,14 +176,16 @@ _event_logger = EventLogger(
 try:
     from app.config import HOST, PORT, JPEG_QUALITY
     from app.config import POSE_EVERY, WEAPON_EVERY, EMOTION_EVERY
+    from app.config import STREAM_WIDTH, STREAM_HEIGHT, STREAM_QUALITY
 except Exception:
-    HOST, PORT, JPEG_QUALITY = "0.0.0.0", 8000, 80
-    POSE_EVERY, WEAPON_EVERY, EMOTION_EVERY = 1, 1, 5
+    HOST, PORT, JPEG_QUALITY = "0.0.0.0", 8000, 85
+    POSE_EVERY, WEAPON_EVERY, EMOTION_EVERY = 4, 6, 10
+    STREAM_WIDTH, STREAM_HEIGHT, STREAM_QUALITY = 960, 540, 60
 
-# New frame-skip intervals for IBVAP detectors
-ANPR_EVERY    = 5   # every 5th frame
-VEHICLE_EVERY = 3   # every 3rd frame
-FACE_EVERY    = 4   # every 4th frame
+# OPT-05: raised frame-skip intervals for new IBVAP detectors
+ANPR_EVERY    = 8   # every 8th frame  (was 5)
+VEHICLE_EVERY = 5   # every 5th frame  (was 3)
+FACE_EVERY    = 6   # every 6th frame  (was 4)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -271,10 +275,13 @@ class CameraState:
     def __init__(self, camera_id: str) -> None:
         self.camera_id = camera_id
         self.lock = threading.Lock()
-        # Latest raw frame (for MJPEG stream)
+        # Latest raw frame (captured by capture_thread)
         self.raw_frame: Optional[np.ndarray] = None
-        # Latest annotated frame (inference output)
-        self.stream_frame: Optional[np.ndarray] = None
+        # Latest fully-rendered display frame (set by display_thread)
+        self.display_frame: Optional[np.ndarray] = None
+        # BBox-only annotation data produced by inference thread (OPT-02/03/04)
+        # Format: list of {"box": [x1,y1,x2,y2], "color": (B,G,R), "label": str, "thick": int}
+        self.bbox_data: List[dict] = []
         # Latest threat state JSON string
         self.last_state_json: str = "{}"
         # Latest full state dict (for /api/status)
@@ -283,27 +290,50 @@ class CameraState:
         self.status: str = "starting"
         self.cam_fps: float = 0.0
         self.inf_fps: float = 0.0
+        # display_frame identity for MJPEG dedup (OPT-09)
+        self._display_frame_id: int = -1
 
     def update_raw(self, frame: np.ndarray) -> None:
         with self.lock:
             self.raw_frame = frame
 
-    def update_stream(self, frame: np.ndarray, state_json: str, state: dict) -> None:
+    def update_bbox(self, bbox_data: List[dict], state_json: str, state: dict) -> None:
+        """Called by inference thread — stores bbox data + state, no full frame copy."""
         with self.lock:
-            self.stream_frame = frame
+            self.bbox_data = bbox_data
             self.last_state_json = state_json
             self.last_state = state
 
-    def get_stream_frame(self) -> Optional[np.ndarray]:
+    def update_display(self, frame: np.ndarray) -> None:
+        """Called by display thread — stores rendered frame for MJPEG."""
         with self.lock:
-            f = self.stream_frame
-            if f is None:
-                f = self.raw_frame
-        return f
+            self.display_frame = frame
+            self._display_frame_id = id(frame)
 
     def get_raw_frame(self) -> Optional[np.ndarray]:
         with self.lock:
             return self.raw_frame
+
+    def get_display_frame(self) -> tuple[Optional[np.ndarray], int]:
+        """Returns (frame, frame_id) for dedup check."""
+        with self.lock:
+            return self.display_frame, self._display_frame_id
+
+    # Legacy compat for any code that still calls get_stream_frame()
+    def get_stream_frame(self) -> Optional[np.ndarray]:
+        with self.lock:
+            f = self.display_frame
+            if f is None:
+                f = self.raw_frame
+        return f
+
+    def update_stream(self, frame: np.ndarray, state_json: str, state: dict) -> None:
+        """Legacy compat — not used in the new display-split path."""
+        with self.lock:
+            self.display_frame = frame
+            self._display_frame_id = id(frame)
+            self.last_state_json = state_json
+            self.last_state = state
 
 
 # ── Global registry of camera states ─────────────────────────────────────────
@@ -363,6 +393,144 @@ def _send_c2_webhook(payload: dict) -> None:
     threading.Thread(target=_post, daemon=True, name="C2Webhook").start()
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ── STRUCTURED LOG WORKER (OPT-08) ───────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_STRUCTURED_LOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pose_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT    NOT NULL,
+    camera_id   TEXT    NOT NULL,
+    anomaly     TEXT    NOT NULL,
+    confidence  REAL    NOT NULL,
+    keypoints   TEXT    NOT NULL
+);
+CREATE TABLE IF NOT EXISTS emotion_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT    NOT NULL,
+    camera_id   TEXT    NOT NULL,
+    dominant    TEXT    NOT NULL,
+    confidence  REAL    NOT NULL,
+    scores      TEXT    NOT NULL,
+    face_box    TEXT    NOT NULL
+);
+CREATE TABLE IF NOT EXISTS weapon_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT    NOT NULL,
+    camera_id   TEXT    NOT NULL,
+    labels      TEXT    NOT NULL,
+    confidence  REAL    NOT NULL,
+    boxes       TEXT    NOT NULL
+);
+"""
+
+
+class StructuredLogWorker:
+    """
+    OPT-08: Non-blocking async log worker.
+    Inference thread calls push(); this worker drains the queue in the
+    background and writes to SQLite in batches. Never blocks the caller.
+    """
+
+    BATCH_INTERVAL = 1.5   # seconds between DB flushes
+    MAX_QUEUE      = 500   # drop oldest when full to prevent runaway memory
+
+    def __init__(self, db_path: str) -> None:
+        self._db_path = db_path
+        self._q: "queue.Queue[dict]" = queue.Queue(maxsize=self.MAX_QUEUE)
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="StructuredLogWorker"
+        )
+        self._thread.start()
+        self._init_schema()
+
+    def _connect(self):
+        import sqlite3
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        return conn
+
+    def _init_schema(self) -> None:
+        try:
+            conn = self._connect()
+            conn.executescript(_STRUCTURED_LOG_SCHEMA)
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            logger.warning(f"[StructuredLogWorker] Schema init failed: {exc}")
+
+    def push(self, record: dict) -> None:
+        """Non-blocking push. Drops oldest record if queue is full."""
+        try:
+            self._q.put_nowait(record)
+        except queue.Full:
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._q.put_nowait(record)
+            except queue.Full:
+                pass
+
+    def _run(self) -> None:
+        while True:
+            batch: list[dict] = []
+            deadline = time.perf_counter() + self.BATCH_INTERVAL
+            while time.perf_counter() < deadline:
+                remaining = max(0.05, deadline - time.perf_counter())
+                try:
+                    item = self._q.get(timeout=remaining)
+                    batch.append(item)
+                except queue.Empty:
+                    break
+
+            if not batch:
+                continue
+
+            poses, emotions, weapons = [], [], []
+            for rec in batch:
+                t = rec.get("_type")
+                if t == "pose":      poses.append(rec)
+                elif t == "emotion": emotions.append(rec)
+                elif t == "weapon":  weapons.append(rec)
+
+            try:
+                conn = self._connect()
+                if poses:
+                    conn.executemany(
+                        "INSERT INTO pose_logs "
+                        "(ts,camera_id,anomaly,confidence,keypoints) "
+                        "VALUES (:ts,:camera_id,:anomaly,:confidence,:keypoints)",
+                        poses,
+                    )
+                if emotions:
+                    conn.executemany(
+                        "INSERT INTO emotion_logs "
+                        "(ts,camera_id,dominant,confidence,scores,face_box) "
+                        "VALUES (:ts,:camera_id,:dominant,:confidence,:scores,:face_box)",
+                        emotions,
+                    )
+                if weapons:
+                    conn.executemany(
+                        "INSERT INTO weapon_logs "
+                        "(ts,camera_id,labels,confidence,boxes) "
+                        "VALUES (:ts,:camera_id,:labels,:confidence,:boxes)",
+                        weapons,
+                    )
+                conn.commit()
+                conn.close()
+            except Exception as exc:
+                logger.debug(f"[StructuredLogWorker] Write failed: {exc}")
+
+
+# Singleton initialised in lifespan startup
+_structured_logger: Optional["StructuredLogWorker"] = None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ── HUD OVERLAY ───────────────────────────────────════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -397,6 +565,31 @@ def _draw_hud(frame: np.ndarray, state: dict, camera_id: str, fps: float) -> Non
     cv2.putText(frame, f"{fps:.1f}FPS", (w - 90, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (100, 100, 100), 1)
 
 
+# ── BBox-only annotation helper (OPT-02/03/04) ────────────────────────────────────────────────────────
+
+def _draw_bboxes_only(frame: np.ndarray, bbox_data: List[dict]) -> None:
+    """
+    OPT-02/03/04: Draw ONLY bounding boxes + a small label.
+    No keypoints, no skeleton bones, no confidence text blocks.
+    This is the fast path run by the display thread at 30 FPS.
+    Each entry in bbox_data:
+        {"box": [x1,y1,x2,y2], "color": (B,G,R), "label": str, "thick": int}
+    """
+    for item in bbox_data:
+        x1, y1, x2, y2 = item["box"]
+        color = item.get("color", (0, 220, 100))
+        thick = item.get("thick", 2)
+        label = item.get("label", "")
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, thick)
+        if label:
+            # Compact single-line label above the box
+            cv2.putText(
+                frame, label,
+                (x1, max(0, y1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.50, color, 1, cv2.LINE_AA,
+            )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ── CAMERA WORKER THREAD ─────────────────────────════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -404,13 +597,24 @@ def _draw_hud(frame: np.ndarray, state: dict, camera_id: str, fps: float) -> Non
 class CameraWorker:
     """
     Per-camera worker: captures frames, runs inference pipeline, broadcasts.
-    Each instance runs two daemon threads:
+    Each instance runs THREE daemon threads:
       1. capture_thread   — reads frames from cv2.VideoCapture into a queue
-      2. inference_thread — pulls frames, runs detectors, broadcasts WS
+      2. inference_thread — pulls frames, runs detectors, pushes bbox_data
+      3. display_thread   — reads raw_frame + bbox_data, renders, stores display_frame
+    The display thread always targets 30 FPS independently of inference speed (OPT-01).
     """
 
     RECONNECT_DELAY = 2.0
     MAX_RETRIES = 0          # 0 = retry forever
+
+    # Pose anomaly → BGR color for live bbox (OPT-02)
+    _POSE_COLORS = {
+        "normal":            (0,  200, 80),
+        "raised_hands":      (0,  165, 255),
+        "aggressive_stance": (0,  0,   255),
+        "crouching":         (0,  200, 200),
+        "running":           (255, 100, 0),
+    }
 
     def __init__(self, cam_cfg: dict) -> None:
         self.cam_id   = str(cam_cfg["id"])
@@ -447,6 +651,10 @@ class CameraWorker:
         ).start()
         threading.Thread(
             target=self._inference_loop, daemon=True, name=f"Inf-{self.cam_id}"
+        ).start()
+        # OPT-01: dedicated display thread
+        threading.Thread(
+            target=self._display_loop, daemon=True, name=f"Disp-{self.cam_id}"
         ).start()
 
     # ── Capture thread ────────────────────────────────────────────────────────
@@ -691,20 +899,39 @@ class CameraWorker:
             else:
                 last_fence = FenceResult()
 
-            # ── Annotate full-resolution frame ────────────────────────────────
-            annotated = frame.copy()
-            if pose_det:
-                annotated = PoseDetector.annotate(annotated, last_poses)
-            if weapon_det:
-                annotated = weapon_det.annotate(annotated, last_weapon)
-            if emo_det:
-                annotated = emo_det.annotate(annotated, last_emos)
-            if vehicle_det:
-                annotated = vehicle_det.annotate(annotated, last_vehicle)
-            if anpr_det:
-                annotated = anpr_det.annotate(annotated, last_anpr)
-            if self.zones:
-                annotated = fence_det.annotate(annotated, last_fence, self.zones)
+            # ── Build bbox_data for display thread (OPT-01/02/03/04) ──────────
+            # Only lightweight box descriptors — NO cv2 draw calls in this thread.
+            bbox_data: List[dict] = []
+
+            # Pose boxes: color-coded by anomaly (OPT-02)
+            for p in last_poses:
+                color = self._POSE_COLORS.get(p.anomaly.value, (0, 200, 80))
+                lbl   = p.anomaly.value.replace("_", " ").upper() if p.anomaly.value != "normal" else ""
+                bbox_data.append({"box": p.bbox, "color": color, "label": lbl, "thick": 2})
+
+            # Weapon boxes: thick red/orange, compact label (OPT-04)
+            for box, label in zip(last_weapon.boxes, last_weapon.labels):
+                tier_color = (0, 0, 255) if label == "pistol" else (0, 120, 255)
+                bbox_data.append({"box": box, "color": tier_color, "label": f"WPN:{label.upper()}", "thick": 3})
+
+            # Emotion face boxes: thin border + emotion label (OPT-03)
+            _emo_colors = {
+                "angry":    (0,   0,   255),
+                "fear":     (128, 0,   128),
+                "happy":    (0,   255, 128),
+                "neutral":  (180, 180, 180),
+                "sad":      (255, 128, 0),
+                "surprise": (0,   200, 255),
+                "disgust":  (0,   128, 128),
+            }
+            for er in last_emos:
+                if er.face_box:
+                    ec = _emo_colors.get(er.label, (200, 200, 200))
+                    bbox_data.append({"box": er.face_box, "color": ec, "label": er.label.upper(), "thick": 1})
+
+            # Vehicle boxes: thin yellow-grey
+            for v in last_vehicle.vehicles:
+                bbox_data.append({"box": v.bbox, "color": (180, 180, 60), "label": v.vehicle_type.upper(), "thick": 1})
 
             # ── Compute threat score ──────────────────────────────────────────
             top_emo    = last_emos[0].label  if last_emos else "neutral"
@@ -729,7 +956,6 @@ class CameraWorker:
                 num_persons=len(last_poses),
             )
 
-            # Also call existing ThreatAggregator for Prometheus metrics compat
             existing_state = aggregator.update(
                 weapon_detected=last_weapon.detected,
                 weapon_labels=last_weapon.labels,
@@ -740,7 +966,7 @@ class CameraWorker:
                 num_persons=len(last_poses),
             )
 
-            # ── Build extended state dict (WS payload) ────────────────────────
+            # ── Build state dict (WS payload) ─────────────────────────────────
             fence_breaches_list = [
                 {
                     "zone_id":     b.zone_id,
@@ -782,11 +1008,14 @@ class CameraWorker:
             }
             state_json = json.dumps(state_dict)
 
-            # ── HUD overlay ───────────────────────────────────────────────────
-            _draw_hud(annotated, state_dict, self.cam_id, self.state.inf_fps)
+            # OPT-01: push bbox_data + state — display_loop renders independently
+            self.state.update_bbox(bbox_data, state_json, state_dict)
 
-            # ── Update camera state ───────────────────────────────────────────
-            self.state.update_stream(annotated, state_json, state_dict)
+            # Carry fence state for display_loop zone rendering
+            with self.state.lock:
+                self.state._last_fence  = last_fence
+                self.state._fence_zones = self.zones
+                self.state._fence_det   = fence_det
 
             # ── Prometheus metrics ────────────────────────────────────────────
             update_threat_metrics(
@@ -800,7 +1029,7 @@ class CameraWorker:
                 alert_event=(alert_level != "INFO"),
             )
 
-            # ── WS broadcast: update all panels every 1 s ─────────────────
+            # ── WS broadcast: every 1 s (OPT-10) ─────────────────────────────
             now = time.perf_counter()
             with _panel_bc_lock:
                 if (now - _last_panel_bc[0]) >= 1.0:
@@ -809,6 +1038,9 @@ class CameraWorker:
 
             # ── Event logging (WARNING / CRITICAL) ───────────────────────────
             if alert_level in ("WARNING", "CRITICAL"):
+                snap_frame = None
+                if alert_level == "CRITICAL":
+                    snap_frame = self.state.get_stream_frame()
                 _event_logger.log(
                     camera_id=self.cam_id,
                     alert_level=alert_level,
@@ -820,11 +1052,9 @@ class CameraWorker:
                     fence_breaches=fence_breaches_list,
                     anpr_plates=anpr_plates,
                     anpr_hits=anpr_hits,
-                    frame=(annotated if alert_level == "CRITICAL" else None),
+                    frame=snap_frame,
                     raw_payload=state_dict,
                 )
-
-                # C2 webhook for CRITICAL
                 if alert_level == "CRITICAL":
                     _send_c2_webhook(state_dict)
 
@@ -840,40 +1070,109 @@ class CameraWorker:
 
         logger.info(f"[{self.cam_id}] Inference stopped.")
 
+    # ── Display thread (OPT-01) ───────────────────────────────────────────────
+
+    def _display_loop(self) -> None:
+        """
+        OPT-01: Dedicated display thread targeting 30 FPS.
+        Reads raw_frame + bbox_data and renders only lightweight bboxes.
+        Completely decoupled from inference speed.
+        """
+        target_interval = 1.0 / 30.0
+        last_t = time.perf_counter()
+
+        while not _stop_event.is_set():
+            raw = self.state.get_raw_frame()
+            if raw is None:
+                time.sleep(0.01)
+                continue
+
+            # One copy for this display frame
+            vis = raw.copy()
+
+            # Snapshot bbox_data + state without holding lock long
+            with self.state.lock:
+                bboxes      = list(self.state.bbox_data)
+                cur_state   = dict(self.state.last_state)
+                last_fence  = getattr(self.state, "_last_fence",  FenceResult())
+                fence_zones = getattr(self.state, "_fence_zones", [])
+                fence_det   = getattr(self.state, "_fence_det",   None)
+
+            # Fast bbox-only drawing (OPT-02/03/04)
+            _draw_bboxes_only(vis, bboxes)
+
+            # Geofence zone lines (lightweight vector ops only)
+            if fence_zones and fence_det is not None:
+                try:
+                    fence_det.annotate(vis, last_fence, fence_zones)
+                except Exception:
+                    pass
+
+            # HUD strip
+            _draw_hud(vis, cur_state, self.cam_id, self.state.inf_fps)
+
+            # Store rendered frame for MJPEG generator
+            self.state.update_display(vis)
+
+            # Throttle to ~30 FPS
+            now = time.perf_counter()
+            sleep_t = target_interval - (now - last_t)
+            if sleep_t > 0:
+                time.sleep(sleep_t)
+            last_t = time.perf_counter()
+
+        logger.info(f"[{self.cam_id}] Display stopped.")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ── MJPEG GENERATOR ───────────────────────────────────────────────────────────
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _mjpeg_gen(camera_id: str):
-    """Serve MJPEG stream for a specific camera."""
-    boundary     = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
-    quality      = min(JPEG_QUALITY, 75)
-    encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
+    """
+    OPT-06/09: Downscaled (960×540) MJPEG stream with frame deduplication.
+    Only encodes a new JPEG when the display thread has produced a new frame;
+    never sends the same frame twice.
+    """
+    boundary      = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+    encode_params = [cv2.IMWRITE_JPEG_QUALITY, STREAM_QUALITY]   # OPT-06: quality=60
     interval      = 1.0 / 30.0
     last_t        = time.perf_counter()
+    last_frame_id = -1   # OPT-09: dedup sentinel
 
     state = _camera_states.get(camera_id)
 
     while True:
         if state is None:
-            # Try again — might not be initialised yet
             state = _camera_states.get(camera_id)
 
-        frame = state.get_stream_frame() if state else None
-
-        if frame is None:
+        if state is None:
             time.sleep(0.02)
             continue
 
-        ret, buf = cv2.imencode(".jpg", frame, encode_params)
+        frame, frame_id = state.get_display_frame()
+
+        # OPT-09: skip if nothing new
+        if frame is None or frame_id == last_frame_id:
+            time.sleep(0.005)
+            continue
+
+        last_frame_id = frame_id
+
+        # OPT-06: downscale to 960×540 before encode
+        try:
+            small = cv2.resize(frame, (STREAM_WIDTH, STREAM_HEIGHT), interpolation=cv2.INTER_LINEAR)
+        except Exception:
+            small = frame
+
+        ret, buf = cv2.imencode(".jpg", small, encode_params)
         if not ret:
             time.sleep(0.01)
             continue
 
         yield boundary + buf.tobytes() + b"\r\n"
 
-        now    = time.perf_counter()
+        now     = time.perf_counter()
         sleep_t = interval - (now - last_t)
         if sleep_t > 0:
             time.sleep(sleep_t)
@@ -886,8 +1185,12 @@ def _mjpeg_gen(camera_id: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _ws_loop
+    global _ws_loop, _structured_logger
     _ws_loop = asyncio.get_event_loop()
+
+    # OPT-08: start async structured log worker (pose/emotion/weapon tables)
+    _structured_logger = StructuredLogWorker(_DB_PATH)
+    logger.info("[IBVAP] StructuredLogWorker started.")
 
     # Start one CameraWorker per camera in cameras.yaml
     workers: list[CameraWorker] = []
@@ -911,6 +1214,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="IBVAP — Intelligent Border Video Analytics Platform", lifespan=lifespan)
+
+# ── Static files + Jinja2 templates ─────────────────────────────────────────
+_STATIC_DIR   = _PROJECT_ROOT / "static"
+_TEMPLATE_DIR = _PROJECT_ROOT / "templates"
+
+os.makedirs(_STATIC_DIR, exist_ok=True)
+os.makedirs(_TEMPLATE_DIR, exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+_jinja = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 
 # ── Prometheus middleware ─────────────────────────────────────────────────────
@@ -937,13 +1250,42 @@ async def metrics_middleware(request, call_next):
             ).observe(latency)
 
 
-# ── HTML Dashboard ────────────────────────────────────────────────────────────
-_HTML_PATH = pathlib.Path(__file__).resolve().parent.parent / "templates" / "index.html"
-
+# ── Multi-page Dashboard Routes ──────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    return HTMLResponse(content=_HTML_PATH.read_text(encoding="utf-8"))
+async def page_live_matrix(request: Request):
+    return _jinja.TemplateResponse(request=request, name="live_matrix.html",
+                                    context={"active_page": "live"})
+
+
+@app.get("/threat-feed", response_class=HTMLResponse)
+async def page_threat_feed(request: Request):
+    return _jinja.TemplateResponse(request=request, name="threat_feed.html",
+                                    context={"active_page": "threat"})
+
+
+@app.get("/threat-intel", response_class=HTMLResponse)
+async def page_threat_intel(request: Request):
+    return _jinja.TemplateResponse(request=request, name="threat_intel.html",
+                                    context={"active_page": "threat_intel"})
+
+
+@app.get("/anpr-tracker", response_class=HTMLResponse)
+async def page_anpr_tracker(request: Request):
+    return _jinja.TemplateResponse(request=request, name="anpr_tracker.html",
+                                    context={"active_page": "anpr"})
+
+
+@app.get("/geofence-editor", response_class=HTMLResponse)
+async def page_geofence_editor(request: Request):
+    return _jinja.TemplateResponse(request=request, name="geofence_editor.html",
+                                    context={"active_page": "geofence"})
+
+
+@app.get("/incident-logs", response_class=HTMLResponse)
+async def page_incident_logs(request: Request):
+    return _jinja.TemplateResponse(request=request, name="incident_logs.html",
+                                    context={"active_page": "incidents"})
 
 
 # ── MJPEG Video Feed ──────────────────────────────────────────────────────────
@@ -1049,12 +1391,14 @@ async def serve_snapshot(filename: str):
     return FileResponse(filepath, media_type="image/jpeg")
 
 
-# ── API: Watchlist (plates) ───────────────────────────────────────────────────
+# ── API: Watchlist (plates — simple list) ────────────────────────────────────
+_ANPR_DETAIL_WATCHLIST = str(_PROJECT_ROOT / "data" / "watchlist" / "plates_detail.json")
+
+
 @app.get("/api/watchlist/plates")
 async def get_watchlist():
-    watchlist_path = _ANPR_WATCHLIST
     try:
-        with open(watchlist_path, "r") as f:
+        with open(_ANPR_WATCHLIST, "r") as f:
             data = json.load(f)
         return JSONResponse(content=data)
     except FileNotFoundError:
@@ -1065,33 +1409,240 @@ async def get_watchlist():
 
 @app.post("/api/watchlist/plates")
 async def add_watchlist_plate(payload: dict):
+    """Add a plate (simple). Body: {"plate": "MH12AB1234"}"""
+    plate = str(payload.get("plate", "")).strip().upper()
+    if not plate:
+        return JSONResponse(content={"error": "plate field required"}, status_code=400)
+    try:
+        with open(_ANPR_WATCHLIST, "r") as f:
+            data = json.load(f)
+    except Exception:
+        data = {"plates": []}
+    plates_set = set(data.get("plates", []))
+    plates_set.add(plate)
+    data["plates"] = sorted(plates_set)
+    with open(_ANPR_WATCHLIST, "w") as f:
+        json.dump(data, f, indent=2)
+    return JSONResponse(content={"status": "ok", "plate": plate, "total": len(plates_set)})
+
+
+# ── API: Watchlist Detail (plates with metadata) ──────────────────────────────
+
+@app.get("/api/watchlist/plates/detail")
+async def get_watchlist_detail():
+    """Get all plates with full metadata (type, status, notes)."""
+    try:
+        with open(_ANPR_DETAIL_WATCHLIST, "r") as f:
+            data = json.load(f)
+        return JSONResponse(content=data)
+    except FileNotFoundError:
+        return JSONResponse(content={"plates": []})
+    except Exception as exc:
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+
+@app.post("/api/watchlist/plates/detail")
+async def add_watchlist_detail(payload: dict):
     """
-    Add a plate to the watchlist at runtime.
-    Body: {"plate": "MH12AB1234"}
+    Add a plate with full metadata.
+    Body: {"plate": "MH12", "vehicle_type": "Sedan", "status": "watch", "notes": "..."}
     """
+    from datetime import datetime, timezone
     plate = str(payload.get("plate", "")).strip().upper()
     if not plate:
         return JSONResponse(content={"error": "plate field required"}, status_code=400)
 
-    watchlist_path = _ANPR_WATCHLIST
+    entry = {
+        "plate":        plate,
+        "vehicle_type": str(payload.get("vehicle_type", "")).strip(),
+        "status":       str(payload.get("status", "watch")).strip(),
+        "notes":        str(payload.get("notes", "")).strip(),
+        "timestamp":    datetime.now(timezone.utc).isoformat(),
+    }
+
     try:
-        with open(watchlist_path, "r") as f:
+        with open(_ANPR_DETAIL_WATCHLIST, "r") as f:
             data = json.load(f)
     except Exception:
         data = {"plates": []}
 
-    plates_set = set(data.get("plates", []))
-    plates_set.add(plate)
-    data["plates"] = sorted(plates_set)
+    # Remove existing entry for same plate
+    data["plates"] = [p for p in data.get("plates", []) if p.get("plate") != plate]
+    data["plates"].insert(0, entry)
 
-    with open(watchlist_path, "w") as f:
+    with open(_ANPR_DETAIL_WATCHLIST, "w") as f:
         json.dump(data, f, indent=2)
 
-    # Also reload in running ANPR detectors
-    for cam_id, state in _camera_states.items():
-        pass  # ANPRDetector instances are inside threads; they'll reload on next watchlist load
+    # Also sync to the simple watchlist file used by ANPR detector
+    try:
+        with open(_ANPR_WATCHLIST, "r") as f:
+            simple = json.load(f)
+    except Exception:
+        simple = {"plates": []}
+    plates_set = set(simple.get("plates", []))
+    plates_set.add(plate)
+    simple["plates"] = sorted(plates_set)
+    with open(_ANPR_WATCHLIST, "w") as f:
+        json.dump(simple, f, indent=2)
 
-    return JSONResponse(content={"status": "ok", "plate": plate, "total": len(plates_set)})
+    return JSONResponse(content={"status": "ok", "entry": entry})
+
+
+@app.delete("/api/watchlist/plates/{plate}")
+async def delete_watchlist_plate(plate: str):
+    """Remove a plate from both watchlist files."""
+    plate = plate.strip().upper()
+
+    # Remove from detail list
+    try:
+        with open(_ANPR_DETAIL_WATCHLIST, "r") as f:
+            data = json.load(f)
+        original_count = len(data.get("plates", []))
+        data["plates"] = [p for p in data.get("plates", []) if p.get("plate") != plate]
+        with open(_ANPR_DETAIL_WATCHLIST, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as exc:
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+    # Remove from simple list
+    try:
+        with open(_ANPR_WATCHLIST, "r") as f:
+            simple = json.load(f)
+        plates_set = set(simple.get("plates", []))
+        plates_set.discard(plate)
+        simple["plates"] = sorted(plates_set)
+        with open(_ANPR_WATCHLIST, "w") as f:
+            json.dump(simple, f, indent=2)
+    except Exception:
+        pass
+
+    return JSONResponse(content={"status": "ok", "plate": plate})
+
+
+# ── API: Threat Breakdown ─────────────────────────────────────────────────────
+@app.get("/api/threat-breakdown")
+async def api_threat_breakdown(minutes: int = 30):
+    """
+    Returns:
+      live_threats  – per-type count from all live camera states (right now)
+      per_camera    – per-camera alert level + active threat labels
+      timeline      – 5-min-bucketed detection counts for last `minutes` minutes
+    """
+    import sqlite3
+    from datetime import datetime, timezone, timedelta
+
+    # ── Live threat state from current camera states ──────────────────────────
+    live_threats = {
+        "weapon":          0,
+        "anpr_blacklist":  0,
+        "aggressive_pose": 0,
+        "raised_hands":    0,
+        "fence_breach":    0,
+        "hostile_emotion": 0,
+        "vehicle":         0,
+    }
+    per_camera: dict = {}
+
+    for cam_id, st in _camera_states.items():
+        try:
+            s = json.loads(st.last_state_json or "{}")
+        except Exception:
+            s = {}
+        cam_threats = []
+
+        if s.get("weapon_detected"):
+            live_threats["weapon"] += 1
+            cam_threats.append("ARMED PERSON")
+
+        if s.get("anpr_watchlist_hit"):
+            live_threats["anpr_blacklist"] += 1
+            cam_threats.append("BLACKLISTED PLATE")
+
+        pose = s.get("pose_anomaly", "normal")
+        if pose == "aggressive_stance":
+            live_threats["aggressive_pose"] += 1
+            cam_threats.append("AGGRESSIVE STANCE")
+        elif pose == "raised_hands":
+            live_threats["raised_hands"] += 1
+            cam_threats.append("HANDS RAISED")
+
+        if s.get("fence_has_breach"):
+            live_threats["fence_breach"] += 1
+            cam_threats.append("FENCE BREACH")
+
+        emo = s.get("emotion", "neutral")
+        if emo in ("angry", "fear", "disgust"):
+            live_threats["hostile_emotion"] += 1
+            cam_threats.append(f"HOSTILE EMOTION ({emo.upper()})")
+
+        if s.get("vehicle_detected"):
+            live_threats["vehicle"] += 1
+
+        per_camera[cam_id] = {
+            "alert_level":    s.get("alert_level", "INFO"),
+            "threat_score":   s.get("threat_score", 0),
+            "active_threats": cam_threats,
+            "num_persons":    s.get("num_persons", 0),
+        }
+
+    # ── Historical timeline from incidents DB ─────────────────────────────────
+    bucket_min = 5
+    now_utc = datetime.now(timezone.utc)
+    cutoff  = now_utc - timedelta(minutes=minutes)
+    timeline: list[dict] = []
+
+    try:
+        conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT timestamp, weapon_detected, pose_anomaly,
+                   fence_has_breach, emotion, anpr_watchlist_hit, vehicle_detected
+            FROM incidents
+            WHERE timestamp >= ?
+            ORDER BY timestamp ASC
+        """, (cutoff.isoformat(),)).fetchall()
+        conn.close()
+
+        # Pre-fill empty buckets
+        n_buckets = (minutes // bucket_min) + 1
+        buckets: dict[str, dict] = {}
+        for i in range(n_buckets):
+            t   = cutoff + timedelta(minutes=i * bucket_min)
+            key = t.strftime("%H:%M")
+            buckets[key] = {"time": key, "weapon": 0, "anpr": 0,
+                            "pose": 0, "fence": 0, "emotion": 0, "total": 0}
+
+        for row in rows:
+            try:
+                ts = datetime.fromisoformat(str(row["timestamp"]).replace("Z", "+00:00"))
+                offset = (ts - cutoff).total_seconds() / 60
+                bidx   = int(offset // bucket_min)
+                bkey   = (cutoff + timedelta(minutes=bidx * bucket_min)).strftime("%H:%M")
+                if bkey not in buckets:
+                    continue
+                b = buckets[bkey]
+                b["total"] += 1
+                if row["weapon_detected"]:    b["weapon"] += 1
+                if row["anpr_watchlist_hit"]: b["anpr"]   += 1
+                if row["fence_has_breach"]:   b["fence"]  += 1
+                if (row["pose_anomaly"] or "") in ("aggressive_stance", "raised_hands"):
+                    b["pose"] += 1
+                if (row["emotion"] or "") in ("angry", "fear", "disgust"):
+                    b["emotion"] += 1
+            except Exception:
+                continue
+
+        timeline = list(buckets.values())
+    except Exception as exc:
+        logger.debug(f"[ThreatBreakdown] DB error: {exc}")
+
+    return JSONResponse(content={
+        "live_threats": live_threats,
+        "per_camera":   per_camera,
+        "timeline":     timeline,
+        "window_min":   minutes,
+        "generated_at": now_utc.isoformat(),
+    })
 
 
 # ── Prometheus Metrics ────────────────────────────────────────────────────────

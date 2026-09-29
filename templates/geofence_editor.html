@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+
+{% block title %}IBVAP — Geofence Editor{% endblock %}
+
+{% block head %}
+<style>
+#geo-page {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  padding: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ─── Left: Zone List ─────────────────────────────────────── */
+#geo-zone-col {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#geo-zone-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.geo-controls {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0,0,0,.3);
+  flex-shrink: 0;
+}
+
+#zone-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+
+/* ─── Zone item ───────────────────────────────────────────── */
+.zone-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  transition: all var(--t-fast);
+}
+.zone-item.enabled  { border-color: rgba(0,200,255,.25); }
+.zone-item.disabled { opacity: .55; }
+.zone-item:hover    { border-color: var(--border-hi); background: var(--bg-hover); }
+
+.zone-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.zone-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.zone-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zone-sub {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+/* ─── Camera selector ─────────────────────────────────────── */
+#cam-selector {
+  background: var(--bg-input);
+  border: 1px solid var(--border-med);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 11px;
+  font-family: var(--mono);
+  outline: none;
+  width: 100%;
+  cursor: pointer;
+}
+#cam-selector:focus { border-color: var(--cyan); }
+
+/* ─── Right: Video + Canvas ───────────────────────────────── */
+#geo-canvas-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#geo-video-panel {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+}
+
+#geo-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+#zone-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Corner brackets */
+.geo-corner { position: absolute; width: 20px; height: 20px; border-color: var(--cyan); border-style: solid; opacity: .4; }
+.geo-corner.tl { top: 8px; left: 8px; border-width: 2px 0 0 2px; }
+.geo-corner.tr { top: 8px; right: 8px; border-width: 2px 2px 0 0; }
+.geo-corner.bl { bottom: 8px; left: 8px; border-width: 0 0 2px 2px; }
+.geo-corner.br { bottom: 8px; right: 8px; border-width: 0 2px 2px 0; }
+
+#geo-hud {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.geo-hud-item {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--cyan);
+  background: rgba(0,0,0,.7);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(0,200,255,.2);
+  letter-spacing: .5px;
+}
+
+/* ─── Legend ──────────────────────────────────────────────── */
+#geo-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="geo-page">
+
+  <!-- ─── Left: Zone List ───────────────────────────────────── -->
+  <div id="geo-zone-col">
+
+    <!-- Camera selector -->
+    <div class="panel" style="padding:12px;">
+      <div class="panel-title" style="margin-bottom:8px;">SELECT CAMERA</div>
+      <select id="cam-selector">
+        <option>Loading cameras…</option>
+      </select>
+    </div>
+
+    <!-- Zone list -->
+    <div id="geo-zone-panel" class="panel">
+      <div class="panel-hdr">
+        <span class="panel-title">🔷 VIRTUAL ZONES</span>
+        <span class="panel-badge" id="zone-count">0 zones</span>
+      </div>
+      <div id="zone-list">
+        <div class="empty-state">
+          <div class="empty-state-icon">🔷</div>
+          <div class="empty-state-text">Loading zones…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Info card -->
+    <div class="panel card-body" style="border:1px solid var(--border);border-radius:10px;background:var(--bg-card);">
+      <div style="font-size:10px;color:var(--muted);line-height:1.6;">
+        <div style="font-weight:700;color:var(--cyan);margin-bottom:6px;letter-spacing:1px;">ℹ ZONE EDITOR</div>
+        Zone polygons are defined in <span style="color:var(--amber);font-family:var(--mono);">cameras.yaml</span>
+        using normalised coordinates (0.0–1.0).
+        <br><br>
+        To draw new zones interactively, use:
+        <div style="margin-top:6px;font-family:var(--mono);font-size:10px;background:rgba(0,200,255,.05);border:1px solid var(--border);padding:6px 10px;border-radius:6px;">
+          python tools/draw_zones.py --camera CAM_01
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ─── Right: Video + Canvas Overlay ────────────────────── -->
+  <div id="geo-canvas-col">
+
+    <!-- Video feed + zone canvas -->
+    <div id="geo-video-panel">
+      <img id="geo-video" src="" alt="Camera Feed"/>
+      <canvas id="zone-canvas"></canvas>
+
+      <!-- Corner brackets -->
+      <div class="geo-corner tl"></div>
+      <div class="geo-corner tr"></div>
+      <div class="geo-corner bl"></div>
+      <div class="geo-corner br"></div>
+
+      <!-- HUD overlay -->
+      <div id="geo-hud">
+        <div class="geo-hud-item">ZONE EDITOR MODE</div>
+        <div class="geo-hud-item" id="geo-cam-label">NO CAMERA</div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div id="geo-legend">
+      <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1px;text-transform:uppercase;">LEGEND:</span>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:rgba(0,200,255,.5);border:1px solid #00c8ff;"></div>
+        Zone 1
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:rgba(0,220,120,.5);border:1px solid #00dc78;"></div>
+        Zone 2
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:rgba(255,170,0,.5);border:1px solid #ffaa00;"></div>
+        Zone 3
+      </div>
+      <div class="legend-item" style="margin-left:auto;">
+        <div class="legend-dot" style="background:repeating-linear-gradient(45deg,rgba(255,255,255,.1),rgba(255,255,255,.1) 2px,transparent 2px,transparent 6px);border:1px dashed var(--muted);"></div>
+        Disabled
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/geofence_editor.js"></script>
+<script>
+// Update zone count badge and cam label from geofence_editor.js
+const _origRenderZoneList = window.renderZoneList;
+document.addEventListener('DOMContentLoaded', () => {
+  // Patch zone count badge after load
+  const origSelect = window.selectCamera;
+  if (origSelect) {
+    window.selectCamera = function(camId) {
+      origSelect(camId);
+      const badge = document.getElementById('zone-count');
+      if (badge) badge.textContent = `${_zones?.length||0} zones`;
+      const lbl = document.getElementById('geo-cam-label');
+      if (lbl) lbl.textContent = `CAM: ${camId}`;
+    };
+  }
+});
+</script>
+{% endblock %}

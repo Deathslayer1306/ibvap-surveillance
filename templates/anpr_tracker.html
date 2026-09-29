@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+
+{% block title %}IBVAP — ANPR Tracker{% endblock %}
+
+{% block head %}
+<style>
+#anpr-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  gap: 8px;
+  overflow: hidden;
+}
+
+/* ─── Page header ─────────────────────────────────────────── */
+#anpr-page-hdr {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.anpr-hdr-title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  line-height: 1;
+}
+.anpr-hdr-sub {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+/* ─── Table panel ─────────────────────────────────────────── */
+#anpr-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.anpr-tbl-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0,0,0,.3);
+  flex-shrink: 0;
+}
+.registry-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.registry-ver {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--cyan);
+}
+.sync-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  color: var(--green);
+  letter-spacing: 1px;
+  margin-left: auto;
+  font-family: var(--mono);
+}
+.sync-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: blink 2s ease-in-out infinite;
+}
+
+/* ─── Table wrapper ───────────────────────────────────────── */
+#anpr-tbl-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.plate-num {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--cyan);
+  text-shadow: 0 0 8px rgba(0,200,255,.4);
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+tr:hover .row-actions { opacity: 1; }
+
+/* ─── Add modal ───────────────────────────────────────────── */
+#add-plate-modal { }
+
+/* Live hit flash */
+.hit-flash {
+  animation: threat-flash .6s ease-out;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="anpr-page">
+
+  <!-- Page header -->
+  <div id="anpr-page-hdr">
+    <div>
+      <div class="anpr-hdr-title">🚗 ANPR WATCHLIST MANAGER</div>
+      <div class="anpr-hdr-sub">Global Plate Registry &amp; Real-time Hit Detection</div>
+    </div>
+    <button class="btn btn-primary" id="add-plate-btn">
+      + NEW WATCHLIST ENTRY
+    </button>
+  </div>
+
+  <!-- Registry table panel -->
+  <div id="anpr-panel" class="panel">
+    <div class="anpr-tbl-controls">
+      <span class="registry-label">REGISTRY DATABASE</span>
+      <span class="registry-ver" id="registry-count">V00</span>
+      <div class="search-wrap">
+        <input type="text" class="search-input" id="anpr-search" placeholder="Search plates…"/>
+      </div>
+      <div class="sync-indicator">
+        <div class="sync-dot"></div>
+        SYNC: ●
+      </div>
+    </div>
+
+    <div id="anpr-tbl-wrap" class="tbl-wrap">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>TIMESTAMP [UTC]</th>
+            <th>PLATE NUMBER</th>
+            <th>VEHICLE TYPE</th>
+            <th>MATCH STATUS</th>
+            <th>ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody id="anpr-tbl-body">
+          <!-- Populated by anpr_tracker.js -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- ─── Add Plate Modal ────────────────────────────────────── -->
+<div class="modal-overlay" id="add-plate-modal">
+  <div class="modal">
+    <div class="modal-hdr">
+      <span class="modal-title">+ NEW WATCHLIST ENTRY</span>
+      <button class="btn btn-ghost btn-icon btn-sm" id="modal-cancel-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" for="modal-plate-num">Plate Number</label>
+        <input type="text" class="input" id="modal-plate-num"
+               placeholder="e.g. MH12AB1234" maxlength="15"
+               style="text-transform:uppercase;font-weight:700;letter-spacing:2px;font-size:16px;"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="modal-vehicle-type">Vehicle Type</label>
+        <input type="text" class="input" id="modal-vehicle-type"
+               placeholder="e.g. Sedan – White, Truck – Commercial"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="modal-status">Status</label>
+        <select class="form-select" id="modal-status">
+          <option value="watch">WATCH</option>
+          <option value="poi">POI (Person of Interest)</option>
+          <option value="blacklisted">BLACKLISTED</option>
+          <option value="cleared">CLEARED (VIP)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="modal-notes">Notes</label>
+        <input type="text" class="input" id="modal-notes"
+               placeholder="Optional notes…"/>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" id="modal-cancel-btn2" onclick="closeAddModal()">CANCEL</button>
+      <button class="btn btn-primary" id="modal-submit-btn">ADD ENTRY</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/anpr_tracker.js"></script>
+{% endblock %}

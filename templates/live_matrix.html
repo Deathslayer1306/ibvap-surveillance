@@ -1,0 +1,250 @@
+﻿{% extends "base.html" %}
+
+{% block title %}IBVAP â€” Live Matrix{% endblock %}
+
+{% block head %}
+<!-- Chart.js for Threat Intelligence timeline graph -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* â”€â”€â”€ PAGE LAYOUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+#live-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 8px;
+  padding: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Top row: cameras + feed */
+#live-top-row {
+  display: flex;
+  gap: 8px;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* â”€â”€â”€ LEFT: CAMERA GRID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+#cam-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+}
+
+#cam-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* â”€â”€â”€ CAMERA TILE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.cam-tile {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color var(--t-slow), box-shadow var(--t-slow);
+  min-height: 0;
+}
+.cam-tile:hover { border-color: var(--border-hi); box-shadow: 0 0 16px rgba(0,200,255,.1); }
+
+.cam-tile-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  background: rgba(0,0,0,.6);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cam-tile-label { font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 1px; color: var(--cyan); text-transform: uppercase; }
+.cam-tile-id    { font-family: var(--mono); font-size: 9px; color: var(--dim); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); }
+.live-badge    { font-size: 9px; font-weight: 700; color: var(--red); letter-spacing: .5px; animation: blink 1s ease-in-out infinite; }
+.offline-badge { font-size: 9px; color: var(--muted); letter-spacing: .5px; }
+.cam-fps-badge { font-family: var(--mono); font-size: 8px; color: var(--muted); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); }
+
+.cam-tile-body { flex: 1; position: relative; background: #000; min-height: 0; overflow: hidden; }
+.cam-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.cam-corners { position: absolute; inset: 0; pointer-events: none; }
+.cc { position: absolute; width: 16px; height: 16px; border-color: var(--cyan); border-style: solid; opacity: .5; }
+.cc.tl { top: 6px;    left: 6px;    border-width: 2px 0 0 2px; }
+.cc.tr { top: 6px;    right: 6px;   border-width: 2px 2px 0 0; }
+.cc.bl { bottom: 6px; left: 6px;    border-width: 0 0 2px 2px; }
+.cc.br { bottom: 6px; right: 6px;   border-width: 0 2px 2px 0; }
+
+.cam-overlay-info {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  display: flex; justify-content: space-between; padding: 4px 8px;
+  background: linear-gradient(transparent, rgba(0,0,0,.75));
+  font-family: var(--mono); font-size: 9px;
+}
+.cam-overlay-id    { color: var(--cyan); }
+.cam-overlay-score { color: var(--amber); }
+
+.cam-no-signal { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 8px; }
+.no-sig-icon { font-size: 30px; opacity: .3; filter: grayscale(1); }
+.no-sig-text { font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: 2px; }
+.cam-tile-body.offline { background: #060a14; }
+
+/* â”€â”€â”€ RIGHT: THREAT FEED â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+#threat-col {
+  width: 270px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+}
+#threat-feed-panel {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+}
+#threat-escalation-feed {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 8px;
+}
+
+.threat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; flex-shrink: 0; transition: all var(--t-fast); }
+.threat-card.new { animation: slidein-right .3s ease; }
+.threat-card:hover { border-color: var(--border-hi); }
+.threat-card-critical { border-color: rgba(255,40,40,.35); background: rgba(255,20,20,.07); }
+.threat-card-warning  { border-color: rgba(255,170,0,.3);  background: rgba(255,170,0,.05); }
+.threat-card-info     { border-color: rgba(0,220,120,.2); }
+
+.tc-hdr   { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
+.tc-icon  { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.tc-body  { flex: 1; min-width: 0; }
+.tc-title { font-size: 11px; font-weight: 600; color: var(--text); line-height: 1.3; margin-bottom: 2px; }
+.tc-meta  { font-size: 9px; color: var(--muted); }
+.tc-conf  { font-family: var(--mono); }
+.tc-ts    { font-family: var(--mono); font-size: 9px; color: var(--dim); white-space: nowrap; flex-shrink: 0; }
+.tc-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tc-loc   { font-family: var(--mono); font-size: 9px; color: var(--muted); }
+.tc-action { font-size: 9px !important; padding: 3px 8px !important; }
+
+/* â”€â”€â”€ THREAT INTELLIGENCE PANEL (bottom strip) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+#threat-intel-panel {
+  flex-shrink: 0; height: 215px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
+}
+#threat-intel-body {
+  display: flex; gap: 0; flex: 1; min-height: 0; overflow: hidden;
+}
+
+/* Left: pills + per-camera breakdown */
+#ti-left {
+  width: 330px; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px; border-right: 1px solid var(--border); overflow-y: auto;
+}
+
+#ti-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.ti-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px 3px 6px; border-radius: 20px; border: 1px solid;
+  font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: .4px;
+  transition: all .25s; cursor: default; user-select: none;
+}
+.ti-pill.active  { box-shadow: 0 0 7px currentColor; }
+.ti-pill.inactive { opacity: .3; }
+.ti-pill-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.ti-pill-count { background: rgba(255,255,255,.1); border-radius: 8px; padding: 0 4px; font-size: 8px; min-width: 14px; text-align: center; }
+
+.tip-weapon  { color: #ff4545; border-color: rgba(255,69,69,.4); }
+.tip-anpr    { color: #ff8800; border-color: rgba(255,136,0,.4); }
+.tip-pose    { color: #ffcc00; border-color: rgba(255,204,0,.4); }
+.tip-hands   { color: #f0a500; border-color: rgba(240,165,0,.4); }
+.tip-fence   { color: #00c8ff; border-color: rgba(0,200,255,.4); }
+.tip-emotion { color: #c060ff; border-color: rgba(192,96,255,.4); }
+.tip-vehicle { color: #60d090; border-color: rgba(96,208,144,.4); }
+
+/* Per-camera rows */
+#ti-camera-rows { display: flex; flex-direction: column; gap: 4px; }
+
+.ti-cam-row {
+  display: flex; align-items: center; gap: 7px; padding: 4px 8px;
+  background: var(--bg-card); border-radius: 6px; border: 1px solid var(--border);
+  transition: border-color .2s;
+}
+.ti-cam-row.CRITICAL { border-color: rgba(255,40,40,.4); background: rgba(255,20,20,.06); }
+.ti-cam-row.WARNING  { border-color: rgba(255,170,0,.35); background: rgba(255,170,0,.04); }
+
+.ti-cam-id     { font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--cyan); width: 52px; flex-shrink: 0; }
+.ti-cam-score  { font-family: var(--mono); font-size: 9px; color: var(--amber); width: 26px; flex-shrink: 0; }
+.ti-cam-threats { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
+.ti-cam-tag    { font-family: var(--mono); font-size: 8px; padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,.07); color: var(--text); white-space: nowrap; }
+.ti-cam-ok     { font-family: var(--mono); font-size: 8px; color: var(--dim); font-style: italic; }
+
+/* Right: Chart.js */
+#ti-right {
+  flex: 1; min-width: 0; padding: 10px 14px 8px 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.ti-chart-hdr { display: flex; align-items: center; justify-content: space-between; }
+.ti-chart-title { font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 1px; color: var(--dim); text-transform: uppercase; }
+.ti-chart-legend { display: flex; gap: 10px; }
+.ti-legend-item { display: flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 8px; color: var(--dim); }
+.ti-legend-dot  { width: 7px; height: 7px; border-radius: 50%; }
+
+#ti-chart-wrap { flex: 1; min-height: 0; position: relative; }
+#ti-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="live-page">
+
+  <!-- â”€â”€â”€ TOP ROW: Camera Grid + Threat Escalation Feed â”€â”€â”€â”€â”€ -->
+  <div id="live-top-row">
+
+    <!-- Camera Grid -->
+    <div id="cam-grid-wrap">
+      <div id="cam-grid">
+        <div class="cam-tile">
+          <div class="cam-tile-hdr"><span class="cam-tile-label">Loading camerasâ€¦</span></div>
+          <div class="cam-tile-body offline">
+            <div class="cam-no-signal">
+              <div class="no-sig-icon">ðŸ“¡</div>
+              <div class="no-sig-text">CONNECTINGâ€¦</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Threat Escalation Feed -->
+    <div id="threat-col">
+      <div id="threat-feed-panel" class="panel">
+        <div class="panel-hdr" style="background:rgba(255,40,40,.06);border-bottom-color:rgba(255,40,40,.2);">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="panel-title" style="color:var(--red);">âš¡ THREAT ESCALATION FEED</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <div style="width:6px;height:6px;border-radius:50%;background:var(--red);animation:blink 1s ease-in-out infinite;"></div>
+            <span class="panel-badge" style="border-color:rgba(255,40,40,.3);color:var(--red);">LIVE</span>
+          </div>
+        </div>
+        <div id="threat-escalation-feed">
+          <div class="empty-state">
+            <div class="empty-state-icon">ðŸ“¡</div>
+            <div class="empty-state-text">Awaiting threat eventsâ€¦</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- #live-top-row -->
+
+</div><!-- #live-page -->
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/live_matrix.js"></script>
+{% endblock %}

@@ -114,9 +114,11 @@ CAMERA_FPS     = 30
 
 # ─── Inference Intervals (run every N inference-loop iterations) ───────────────
 # Inference loop runs as fast as it can; these control sub-sampling
-POSE_EVERY    = 2    # pose every 2nd inference loop iteration
-WEAPON_EVERY  = 4    # weapon every 4th
-EMOTION_EVERY = 5    # emotion every 5th (heaviest: 2-stage)
+# OPT-05: raised intervals — last-known result is reused between skipped frames,
+# so the display stays smooth while inference load drops significantly.
+POSE_EVERY    = 4    # pose every 4th frame    (was 2)
+WEAPON_EVERY  = 6    # weapon every 6th frame  (was 4)
+EMOTION_EVERY = 10   # emotion every 10th      (was 5, 2-stage pipeline is heaviest)
 
 # ─── Detection Thresholds ─────────────────────────────────────────────────────
 PERSON_CONF        = 0.35
@@ -147,4 +149,11 @@ DB_DIR        = "data/databases"
 # ─── Server ───────────────────────────────────────────────────────────────────
 HOST          = "0.0.0.0"
 PORT          = 8000
-JPEG_QUALITY  = 80    # 80 = good quality + fast encode (vs 95 = slow)
+JPEG_QUALITY  = 85    # snapshot/event quality (kept high for evidence)
+
+# ─── Live Stream (OPT-06) ─────────────────────────────────────────────────────
+# Stream is downscaled before JPEG encode — quarter pixel count vs 1080p.
+# Lower quality is fine for live surveillance; high quality is only for snapshots.
+STREAM_WIDTH   = 960
+STREAM_HEIGHT  = 540
+STREAM_QUALITY = 60   # live MJPEG encode quality (60 = fast, visually sufficient)

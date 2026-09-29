@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}IBVAP — Tactical Surveillance{% endblock %}</title>
+  <meta name="description" content="IBVAP: Real-time AI border surveillance — weapon, pose, emotion, ANPR, virtual fence, and vehicle detection."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <link rel="stylesheet" href="/static/css/sidebar.css"/>
+  {% block head %}{% endblock %}
+</head>
+<body>
+<div id="app-shell">
+
+  <!-- ═══ TOPBAR ═══════════════════════════════════════════════════════ -->
+  <header id="topbar">
+    <div class="topbar-left">
+      <div class="brand-icon">🛡</div>
+      <div class="brand-text">
+        <h1>IBVAP</h1>
+        <div class="brand-sub">Tactical Surveillance Node #01</div>
+      </div>
+      <div class="topbar-stat" style="margin-left:16px;">
+        <span>INFERENCE</span>
+        <span class="topbar-stat-val" id="topbar-lat">—</span>
+      </div>
+      <div class="topbar-stat">
+        <span>FPS</span>
+        <span class="topbar-stat-val" id="topbar-fps">—</span>
+      </div>
+      <div class="topbar-stat">
+        <span>CUDA</span>
+        <span class="topbar-stat-val" id="topbar-cuda">70%</span>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div id="threat-level-chip" class="INFO">THREAT LEVEL: INFO</div>
+      <div id="ws-indicator">
+        <div id="ws-dot"></div>
+        <span id="ws-label">OFFLINE</span>
+      </div>
+      <div id="topbar-clock">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- ═══ BODY ══════════════════════════════════════════════════════════ -->
+  <div id="page-body">
+
+    <!-- ─── SIDEBAR ────────────────────────────────────────────────── -->
+    <nav id="sidebar">
+
+      <!-- Agent card -->
+      <div class="agent-card">
+        <div class="agent-card-inner">
+          <div class="agent-avatar">🤖</div>
+          <div>
+            <div class="agent-name">IBVAP Core</div>
+            <div class="agent-sub">Active Session: Alpha-01</div>
+          </div>
+        </div>
+        <button class="btn btn-lockdown" id="lockdown-btn" style="width:100%;justify-content:center;">
+          🔒 LOCKDOWN
+        </button>
+      </div>
+
+      <!-- Nav Menu -->
+      <div id="nav-menu">
+        <div class="nav-section-label">Monitoring</div>
+
+        <a href="/" class="nav-item {% if active_page == 'live' %}active{% endif %}">
+          <span class="nav-icon">⊞</span>
+          <span>Live Matrix</span>
+        </a>
+
+        <a href="/threat-feed" class="nav-item {% if active_page == 'threat' %}active{% endif %}">
+          <span class="nav-icon">⚠</span>
+          <span>Threat Feed</span>
+          <span class="nav-badge" id="crit-nav-count" style="display:none;">0</span>
+        </a>
+
+        <a href="/threat-intel" class="nav-item {% if active_page == 'threat_intel' %}active{% endif %}">
+          <span class="nav-icon">🧠</span>
+          <span>Threat Intel</span>
+        </a>
+
+        <div class="nav-section-label">Analysis</div>
+
+        <a href="/anpr-tracker" class="nav-item {% if active_page == 'anpr' %}active{% endif %}">
+          <span class="nav-icon">🚗</span>
+          <span>ANPR Tracker</span>
+        </a>
+
+        <a href="/geofence-editor" class="nav-item {% if active_page == 'geofence' %}active{% endif %}">
+          <span class="nav-icon">🔷</span>
+          <span>Geofence Editor</span>
+        </a>
+
+        <a href="/incident-logs" class="nav-item {% if active_page == 'incidents' %}active{% endif %}">
+          <span class="nav-icon">📁</span>
+          <span>Incident Logs</span>
+        </a>
+      </div>
+
+      <!-- Sidebar Footer -->
+      <div id="sidebar-footer">
+        <div class="sidebar-footer-item">
+          <span>❓</span>
+          <span>Support</span>
+        </div>
+        <div class="sidebar-footer-item">
+          <span>📊</span>
+          <span>Diagnostics</span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ─── MAIN CONTENT ────────────────────────────────────────────── -->
+    <main id="main-content">
+      {% block content %}{% endblock %}
+
+      <!-- ─── SYSTEM STATUS BAR ───────────────────────────────────── -->
+      <div id="sys-status-bar">
+        <div class="sys-metric">
+          <span class="sys-metric-label">NODE·CPU·01</span>
+          <div class="sys-metric-bar">
+            <div class="metric-bar-bg">
+              <div class="metric-bar-fill cyan" id="cpu-bar" style="width:45%;"></div>
+            </div>
+          </div>
+          <span class="sys-metric-val" id="cpu-val">45%</span>
+        </div>
+        <div class="sys-metric">
+          <span class="sys-metric-label">INFERENCE LATENCY</span>
+          <div class="sys-metric-bar">
+            <div class="metric-bar-bg">
+              <div class="metric-bar-fill green" id="sys-lat-bar" style="width:30%;"></div>
+            </div>
+          </div>
+          <span class="sys-metric-val"><span id="sys-lat">—</span></span>
+        </div>
+        <div class="sys-metric">
+          <span class="sys-metric-label">VRAM USAGE</span>
+          <div class="sys-metric-bar">
+            <div class="metric-bar-bg">
+              <div class="metric-bar-fill amber" id="vram-bar" style="width:34%;"></div>
+            </div>
+          </div>
+          <span class="sys-metric-val" id="vram-val">3.4 GB</span>
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div class="sys-ok">SYS:OK</div>
+          <div class="sys-ok-sub">Uptime: <span id="uptime">00h 00m</span></div>
+        </div>
+      </div>
+    </main>
+  </div><!-- #page-body -->
+</div><!-- #app-shell -->
+
+<script src="/static/js/ws.js"></script>
+{% block scripts %}{% endblock %}
+
+<script>
+// Lockdown toggle (shared across all pages)
+document.addEventListener('DOMContentLoaded', () => {
+  const lockBtn = document.getElementById('lockdown-btn');
+  if (lockBtn) {
+    lockBtn.addEventListener('click', () => {
+      const isLocked = lockBtn.textContent.includes('UNLOCK');
+      lockBtn.textContent = isLocked ? '🔒 LOCKDOWN' : '🔓 UNLOCK';
+      lockBtn.style.background = isLocked
+        ? 'linear-gradient(135deg,#cc0000,#880000)'
+        : 'linear-gradient(135deg,#006600,#004400)';
+    });
+  }
+
+  // Update critical event badge in nav
+  WS.on('state', (data) => {
+    if (data.alert_level === 'CRITICAL') {
+      const badge = document.getElementById('crit-nav-count');
+      if (badge) {
+        const cur = parseInt(badge.textContent) || 0;
+        badge.textContent = cur + 1;
+        badge.style.display = '';
+      }
+    }
+  });
+
+  // Simulated uptime counter
+  let startTime = Date.now();
+  setInterval(() => {
+    const elapsed = Date.now() - startTime;
+    const h = Math.floor(elapsed / 3600000).toString().padStart(2, '0');
+    const m = Math.floor((elapsed % 3600000) / 60000).toString().padStart(2, '0');
+    const el = document.getElementById('uptime');
+    if (el) el.textContent = `${h}h ${m}m`;
+  }, 10000);
+});
+</script>
+</body>
+</html>
