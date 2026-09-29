@@ -113,7 +113,6 @@ Filterable incident database with severity grading (`CRITICAL`, `WARNING`, `INFO
 ### 5. SIH 2026 Problem Statement & Team Submission
 Official Smart India Hackathon 2026 submission details for Problem Statement ID **SIH26187** (Team: **FLAME KAISER**).
 ![SIH Problem Statement](screenshots/08_sih_problem_statement_26187.png)
-![FLAME KAISER Submission](screenshots/09_flame_kaiser_sih_submission.png)
 
 ---
 
