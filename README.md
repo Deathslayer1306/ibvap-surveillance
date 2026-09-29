@@ -301,6 +301,7 @@ Suspicious-Activity-Detection/
 - **Mihir Naik** *(Team Leader)* — [GitHub](https://github.com/Deathslayer1306)  
 - **Mayoogh Manoj**
 - **Ayush Padalkar**
+- **Pradnya Sawant**
 - **Ronit Sinkar**
 - **Mrunmayee Tamse**
 - **Mentor:** Dr. Pranali Choudhari
